@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>互動式成語大師 (GitHub除錯版)</title>
+    <title>互動式成語大師 (GitHub版)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -87,9 +87,10 @@
                 const response = await fetch(url, options);
                 if (!response.ok) {
                     const errorText = await response.text();
-                    console.error(`API Request Failed: ${response.status} ${response.statusText}`, errorText);
-                    // 這裡會捕捉 API 錯誤並拋出，方便後面 alert 顯示
-                    throw new Error(`API Error ${response.status}: ${errorText.substring(0, 100)}...`); 
+                    const err = new Error(`HTTP error! status: ${response.status}`);
+                    err.status = response.status;
+                    err.body = errorText;
+                    throw err;
                 }
                 return response;
             } catch (error) {
@@ -129,8 +130,6 @@
                 return JSON.parse(text);
             } catch (e) { 
                 console.error("Prompt gen failed", e); 
-                // 如果是文字生成就失敗，通常是 Key 無效
-                // alert(`提示詞生成失敗：${e.message}`); 
                 return null; 
             }
         };
@@ -153,8 +152,9 @@
                 return null;
             } catch (e) { 
                 console.error("Image gen failed", e);
-                // 這裡會跳出錯誤視窗，幫助使用者除錯
-                alert(`圖片生成失敗！\n原因: ${e.message}\n\n請檢查 Google Cloud Console 的 API Key 限制設定。`);
+                if (e.status === 400 && e.body.includes("billed users")) {
+                    throw new Error("BILLING_REQUIRED");
+                }
                 return null; 
             }
         };
@@ -172,7 +172,8 @@
             trash: <><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>,
             wand: <><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h0"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></>,
             login: <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>,
-            lightning: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            lightning: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>,
+            imageOff: <><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21l-9-9m-2-2l-6-6"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><line x1="3" y1="3" x2="21" y2="21"/></>
         };
 
         const Icon = ({ path, className, fill = "none" }) => (
@@ -423,7 +424,7 @@
                     <div className="space-y-4">
                         {currentItems.map(item => (
                             <div key={item.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 relative group hover:shadow-md transition-all">
-                                <button onClick={() => toggleFavorite(item.id)} className="absolute top-4 right-4 text-gray-300 hover:text-red-500 z-10"><Icon path={icons.heart} className="w-6 h-6" fill={favorites.includes(item.id) ? "currentColor" : "none"} /></button>
+                                <button onClick={() => toggleFavorite(item.id)} className={`absolute top-4 right-4 z-10 transition-colors ${favorites.includes(item.id) ? 'text-red-500' : 'text-gray-300 hover:text-red-500'}`}><Icon path={icons.heart} className="w-6 h-6" fill={favorites.includes(item.id) ? "currentColor" : "none"} /></button>
                                 <div className="flex flex-col md:flex-row gap-6">
                                     <div className="flex-1">
                                         <div className="flex items-baseline gap-3 mb-2"><h3 className="text-2xl font-bold text-gray-800">{item.term}</h3><span className={`text-xs px-2 py-0.5 rounded ${item.sentiment === '褒義詞' ? 'bg-green-100 text-green-700' : item.sentiment === '貶義詞' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>{item.sentiment}</span></div>
@@ -499,7 +500,7 @@
                     <div className="space-y-8">
                         {questions.map((q, idx) => (
                             <div key={idx} className={`bg-white rounded-xl shadow-sm border-2 overflow-hidden transition-all duration-500 relative ${q.userAnswer === null ? 'border-transparent' : (q.isCorrect ? 'border-green-200 bg-green-50/30' : 'border-red-200 bg-red-50/30')}`}>
-                                <button onClick={() => toggleFavorite(q.id)} className="absolute top-4 right-4 text-gray-300 hover:text-red-500 z-10"><Icon path={icons.heart} className="w-6 h-6" fill={favorites.includes(q.id) ? "currentColor" : "none"} /></button>
+                                <button onClick={() => toggleFavorite(q.id)} className={`absolute top-4 right-4 z-10 transition-colors ${favorites.includes(q.id) ? 'text-red-500' : 'text-gray-300 hover:text-red-500'}`}><Icon path={icons.heart} className="w-6 h-6" fill={favorites.includes(q.id) ? "currentColor" : "none"} /></button>
                                 <div className="p-6 border-b border-gray-50">
                                     <div className="flex justify-between items-center mb-4">
                                         <span className="font-black text-[#FF0000] tracking-wider">QUESTION {idx + 1}</span>
