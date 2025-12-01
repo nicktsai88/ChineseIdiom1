@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>互動式成語大師 (GitHub版)</title>
+    <title>互動式成語大師 (GitHub除錯版)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -46,10 +46,12 @@
         const ITEMS_PER_PAGE = 15;
         
         // ---------------------------------------------------------
-        // ★★★ 請在此處填入您的 Google Gemini API Key ★★★
+        // ★★★ 請確認您的 API Key 權限設定 ★★★
+        // 如果在 GitHub 上無法顯示圖片，請至 Google Cloud Console
+        // 檢查 API Key 的「網站限制 (HTTP Referrers)」
+        // 必須包含: https://nicktsai88.github.io/*
         // ---------------------------------------------------------
         const apiKey = "AIzaSyC7z4Yywf0uFHzC4f9-7UT2ZnDhLpcxjTs"; 
-        // 例如: const apiKey = "AIzaSyDxxxxxxxxxxxxxxx";
         // ---------------------------------------------------------
 
         // --- Sound Effect Helper ---
@@ -84,10 +86,10 @@
             try {
                 const response = await fetch(url, options);
                 if (!response.ok) {
-                    // Log error details for debugging
                     const errorText = await response.text();
-                    console.error(`API Error (${response.status}):`, errorText);
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    console.error(`API Request Failed: ${response.status} ${response.statusText}`, errorText);
+                    // 這裡會捕捉 API 錯誤並拋出，方便後面 alert 顯示
+                    throw new Error(`API Error ${response.status}: ${errorText.substring(0, 100)}...`); 
                 }
                 return response;
             } catch (error) {
@@ -125,7 +127,12 @@
                 if (!text) return null;
                 text = text.replace(/```json/g, '').replace(/```/g, '').trim();
                 return JSON.parse(text);
-            } catch (e) { console.error("Prompt gen failed", e); return null; }
+            } catch (e) { 
+                console.error("Prompt gen failed", e); 
+                // 如果是文字生成就失敗，通常是 Key 無效
+                // alert(`提示詞生成失敗：${e.message}`); 
+                return null; 
+            }
         };
 
         const generateImage = async (prompt) => {
@@ -144,7 +151,12 @@
                     return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
                 }
                 return null;
-            } catch (e) { console.error("Image gen failed", e); return null; }
+            } catch (e) { 
+                console.error("Image gen failed", e);
+                // 這裡會跳出錯誤視窗，幫助使用者除錯
+                alert(`圖片生成失敗！\n原因: ${e.message}\n\n請檢查 Google Cloud Console 的 API Key 限制設定。`);
+                return null; 
+            }
         };
 
         // Icons
@@ -419,6 +431,16 @@
                                         <div className="text-gray-600 leading-relaxed border-l-4 border-amber-200 pl-3">{item.sentence && item.sentence.split(item.term).map((part, i, arr) => (<React.Fragment key={i}>{part}{i < arr.length - 1 && <span className="text-red-600 font-bold mx-1">{item.term}</span>}</React.Fragment>))}</div>
                                     </div>
                                     {aiData[item.id] && !aiData[item.id].error && (<div className="w-full md:w-64 flex-shrink-0 flex flex-col items-center justify-center animate-fade-in-up">{aiData[item.id].loading ? (<div className="w-full h-40 bg-gray-50 rounded-lg border border-gray-200 flex flex-col items-center justify-center text-gray-400"><div className="loader mb-2"></div><span className="text-xs">AI 繪圖中...</span></div>) : (<div className="bg-indigo-50 rounded-xl p-3 border border-indigo-100 w-full"><div className="mb-2 rounded-lg overflow-hidden border border-indigo-200 bg-white shadow-sm"><img src={aiData[item.id].image} alt="AI illustration" className="w-full h-40 object-cover hover:scale-105 transition-transform duration-500" /></div><div className="text-xs text-indigo-800 font-medium leading-relaxed bg-white/50 p-2 rounded"><span className="font-bold block mb-1 text-indigo-600">💡 AI 情境解說</span>{aiData[item.id].desc}</div></div>)}</div>)}
+                                    {/* Error state */}
+                                    {aiData[item.id] && aiData[item.id].error && (
+                                        <div className="w-full md:w-64 flex-shrink-0 flex flex-col items-center justify-center animate-fade-in-up">
+                                            <div className="w-full h-40 bg-red-50 rounded-lg border border-red-200 flex flex-col items-center justify-center text-red-400 p-2 text-center">
+                                                <Icon path={icons.alert} className="w-6 h-6 mb-1"/>
+                                                <span className="text-xs font-bold">圖片生成失敗</span>
+                                                <button onClick={() => onGenerateAll([item])} className="mt-2 text-xs bg-white border border-red-200 px-2 py-1 rounded shadow-sm hover:bg-red-50">重試</button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ))}
