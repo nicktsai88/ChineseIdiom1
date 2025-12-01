@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>互動式成語大師 (完整備份)</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Canvas Confetti for Visual Effects -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <style>
+        body {
+            font-family: "Noto Sans TC", system-ui, -apple-system, sans-serif;
+            background-color: #f3f4f6;
+        }
+        /* Hide scrollbar for cleaner UI */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+        /* Animations */
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        .animate-pop {
+            animation: pop 0.3s ease-in-out;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        .animate-shake {
+            animation: shake 0.4s ease-in-out;
+        }
+        @keyframes fade-in-up {
+            0% { opacity: 0; transform: translateY(10px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+            animation: fade-in-up 0.5s ease-out forwards;
+        }
+        .loader {
+            border: 3px solid #e0e7ff; /* Indigo-100 */
+            border-radius: 50%;
+            border-top: 3px solid #4f46e5; /* Indigo-600 */
+            width: 20px;
+            height: 20px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+        const apiKey = ""; // API Key 由環境提供
+
+        // --- API Helpers ---
+        const fetchWithRetry = async (url, options, retries = 3, backoff = 1000) => {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok && retries > 0) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response;
+            } catch (error) {
+                if (retries === 0) throw error;
+                await new Promise(r => setTimeout(r, backoff));
+                return fetchWithRetry(url, options, retries - 1, backoff * 2);
+            }
+        };
+
+        // Generate Image Description & Prompt (Text Model)
+        const generateImagePrompt = async (idiom, definition) => {
+            const systemPrompt = `
+                You are an AI visual assistant for a Chinese idiom learning app.
+                Your task is to create a visual concept for the idiom: "${idiom}" (Definition: ${definition}).
+                
+                Goal: Create a metaphorical or literal scene that helps students understand the meaning.
+                
+                CRITICAL REQUIREMENT: The image must NOT contain any text, Chinese characters, letters, or typography. It must be purely visual.
+                
+                Return ONLY a JSON object with these two fields:
+                1. "chineseDescription": A short, educational description in Traditional Chinese (繁體中文) explaining the visual metaphor. Max 40 chars.
+                2. "englishPrompt": A highly detailed image generation prompt. Style: "Flat vector illustration, colorful, clean lines, minimalistic, no text, no words, educational art style".
+                
+                Example JSON:
+                {
+                    "chineseDescription": "畫家在蛇身上畫腳，比喻多此一舉。",
+                    "englishPrompt": "Flat vector illustration of a green snake on the ground, a hand holding a brush is painting legs on it, simple, colorful, white background, no text, no letters."
+                }
+            `;
+
+            try {
+                const response = await fetchWithRetry(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: systemPrompt }] }],
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
+                    }
+                );
+                const data = await response.json();
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                return text ? JSON.parse(text) : null;
+            } catch (e) {
+                console.error("Prompt generation failed", e);
+                return null;
+            }
+        };
+
+        // Generate Image (Image Model)
+        const generateImage = async (prompt) => {
+            try {
+                const response = await fetchWithRetry(
+                    `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            instances: [{ prompt: prompt }],
+                            parameters: { sampleCount: 1 }
+                        })
+                    }
+                );
+                const data = await response.json();
+                if (data.predictions && data.predictions[0]) {
+                    return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+                }
+                return null;
+            } catch (e) {
+                console.error("Image generation failed", e);
+                return null;
+            }
+        };
+
+        // --- Icons ---
+        const IconBookOpen = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        );
+        const IconPlay = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        );
+        const IconSettings = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        );
+        const IconChevronLeft = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="15 18 9 12 15 6"/></svg>
+        );
+        const IconChevronRight = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="9 18 15 12 9 6"/></svg>
+        );
+        const IconMenu = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        );
+        const IconCheckCircle = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        );
+        const IconSave = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        );
+        const IconCalendar = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+        );
+        const IconInfo = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+        );
+        const IconHeart = ({ className, fill }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill={fill ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+        );
+        const IconFlame = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" className={className}><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.1.2-2.2.6-3.3.7 2 2.3 2.8 2.9 3.3z"/></svg>
+        );
+        const IconWand = ({ className }) => (
+             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h0"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></svg>
+        );
+
+        // --- Full Data Source ---
+        const FULL_DATA_SOURCE = `# 事理成語分類大全 (共390則)
+
+## 一、事理：好壞
+
+1. **盡善盡美**：[釋義] 形容事物極為完美，沒有任何缺點。 [例句] 這場表演的每一個細節都安排得<span style="color: red; font-weight: bold;">盡善盡美</span>，讓觀眾嘆為觀止。
+2. **瑕瑜互見**：[釋義] 比喻優點、缺點同時存在。 [例句] 這部電影雖然特效精彩，但劇情稍顯薄弱，可說是<span style="color: red; font-weight: bold;">瑕瑜互見</span>。
+3. **一無是處**：[釋義] 沒有一點對的地方或長處。 [例句] 我們不應該因為一個小缺點，就把別人的努力說得<span style="color: red; font-weight: bold;">一無是處</span>。
+4. **白璧微瑕**：[釋義] 比喻完美的人或事物，有些微小的缺點。 [例句] 這個計畫整體非常出色，只有一點預算上的小問題，算是<span style="color: red; font-weight: bold;">白璧微瑕</span>。
+5. **無懈可擊**：[釋義] 形容十分嚴密，找不到一點漏洞。 [例句] 他的辯論邏輯嚴密，論點<span style="color: red; font-weight: bold;">無懈可擊</span>，令對手無法反駁。
+6. **金玉其外**：[釋義] 外表像金玉般華麗，裡面卻像破棉絮。比喻外表華美，內涵空洞。 [例句] 這個產品包裝精美，但品質低劣，真是<span style="color: red; font-weight: bold;">金玉其外</span>，敗絮其中。
+7. **十全十美**：[釋義] 比喻圓滿美好，毫無缺陷。 [例句] 世界上很難找到<span style="color: red; font-weight: bold;">十全十美</span>的人，我們應該學會包容缺點。
+8. **美中不足**：[釋義] 雖然很好，但還有一些缺陷。 [例句] 這次旅遊非常愉快，唯一<span style="color: red; font-weight: bold;">美中不足</span>的是最後一天下了大雨。
+9. **罄竹難書**：[釋義] 形容罪惡極多，無法寫盡。 [例句] 這個貪官污吏的罪行<span style="color: red; font-weight: bold;">罄竹難書</span>，百姓們無不恨之入骨。
+10. **良莠不齊**：[釋義] 好壞參差不齊。 [例句] 網路上的資訊<span style="color: red; font-weight: bold;">良莠不齊</span>，使用者必須具備判斷真偽的能力。
+11. **一無可取**：[釋義] 沒有一點值得採取或稱讚的地方。 [例句] 如果這份報告內容空洞且數據錯誤，那就真的是<span style="color: red; font-weight: bold;">一無可取</span>了。
+12. **名副其實**：[釋義] 名聲或名稱與實際相符合。 [例句] 這家餐廳連續獲得米其林三星，果然是<span style="color: red; font-weight: bold;">名副其實</span>的美味。
+13. **徒有虛名**：[釋義] 只有名聲，卻無實學或本事。 [例句] 那位專家被問倒後，大家才發現他根本是<span style="color: red; font-weight: bold;">徒有虛名</span>。
+14. **差強人意**：[釋義] 勉強使人滿意。 [例句] 這次考試成績雖然沒有達到預期，但還算<span style="color: red; font-weight: bold;">差強人意</span>，勉強及格。
+15. **別出心裁**：[釋義] 獨出巧思，不同流俗。 [例句] 設計師這套<span style="color: red; font-weight: bold;">別出心裁</span>的禮服，在時裝週上大放異彩。
+16. **巧奪天工**：[釋義] 形容技藝巧妙神奇，勝過天然。 [例句] 這座玉雕作品工藝精湛，簡直是<span style="color: red; font-weight: bold;">巧奪天工</span>。
+17. **粗製濫造**：[釋義] 製作馬虎，品質低劣。 [例句] 這些<span style="color: red; font-weight: bold;">粗製濫造</span>的玩具不僅容易損壞，還可能對兒童造成危險。
+18. **精益求精**：[釋義] 好還要更好，力求盡善盡美。 [例句] 即便已經是行業龍頭，這家公司依然<span style="color: red; font-weight: bold;">精益求精</span>，不斷提升品質。
+19. **乏善可陳**：[釋義] 沒有什麼優點值得提出來稱讚。 [例句] 這部小說的情節老套，文筆平淡，實在是<span style="color: red; font-weight: bold;">乏善可陳</span>。
+20. **無可挑剔**：[釋義] 極為完美，找不到缺點。 [例句] 服務員的態度親切且專業，讓人感到<span style="color: red; font-weight: bold;">無可挑剔</span>。
+21. **狗尾續貂**：[釋義] 比喻事物以壞續好，前後不相稱。 [例句] 這部經典影集的續集拍得極差，簡直是<span style="color: red; font-weight: bold;">狗尾續貂</span>。
+22. **魚目混珠**：[釋義] 比喻以假亂真。 [例句] 不肖商人常用劣質品<span style="color: red; font-weight: bold;">魚目混珠</span>，欺騙消費者。
+23. **瑕不掩瑜**：[釋義] 比喻缺點掩蓋不了優點。 [例句] 雖然這篇文章有些錯字，但觀點獨到，<span style="color: red; font-weight: bold;">瑕不掩瑜</span>，仍值得一讀。
+24. **嘆為觀止**：[釋義] 形容事物極美，令人讚嘆。 [例句] 魔術師神乎其技的表演，讓全場觀眾<span style="color: red; font-weight: bold;">嘆為觀止</span>。
+25. **不堪入目**：[釋義] 形容景象醜惡，令人看不下去。 [例句] 那裡的環境髒亂差，垃圾堆積如山，景象<span style="color: red; font-weight: bold;">不堪入目</span>。
+26. **美輪美奐**：[釋義] 形容房屋規模高大、裝飾華美。 [例句] 新落成的圖書館外觀<span style="color: red; font-weight: bold;">美輪美奐</span>，成為了城市的打卡地標。
+27. **畫蛇添足**：[釋義] 比喻多此一舉，反把事情弄糟。 [例句] 這幅畫已經很完美了，你再多加幾筆反而是<span style="color: red; font-weight: bold;">畫蛇添足</span>。
+28. **錦上添花**：[釋義] 比喻美上加美，好上加好。 [例句] 如果能在這份優良的提案上再加入數據分析，那就更是<span style="color: red; font-weight: bold;">錦上添花</span>了。
+29. **弄巧成拙**：[釋義] 本想取巧，反而敗事。 [例句] 他本想給朋友一個驚喜，結果<span style="color: red; font-weight: bold;">弄巧成拙</span>，反而把對方嚇哭了。
+30. **恰到好處**：[釋義] 剛好到最合適的程度。 [例句] 這道菜的調味<span style="color: red; font-weight: bold;">恰到好處</span>，既不油膩也不過鹹。
+
+## 二、事理：工作
+
+31. **廢寢忘食**：[釋義] 形容專心努力工作或學習。 [例句] 科學家們為了研發疫苗，<span style="color: red; font-weight: bold;">廢寢忘食</span>地在實驗室裡工作。
+32. **兢兢業業**：[釋義] 形容謹慎小心、認真負責的樣子。 [例句] 老王在工作崗位上<span style="color: red; font-weight: bold;">兢兢業業</span>了三十年，從未出過差錯。
+33. **敷衍塞責**：[釋義] 做事馬虎，應付了事。 [例句] 對待客戶的投訴，我們必須認真處理，不可<span style="color: red; font-weight: bold;">敷衍塞責</span>。
+34. **鞠躬盡瘁**：[釋義] 指恭敬謹慎，竭盡心力去效勞。 [例句] 諸葛亮為蜀漢<span style="color: red; font-weight: bold;">鞠躬盡瘁</span>，死而後已的精神令人敬佩。
+35. **按部就班**：[釋義] 做事依照一定的層次與步驟。 [例句] 新手學習程式設計應該<span style="color: red; font-weight: bold;">按部就班</span>，先打好基礎再學進階技巧。
+36. **事半功倍**：[釋義] 費力少而收效大。 [例句] 掌握了正確的學習方法，就能收到<span style="color: red; font-weight: bold;">事半功倍</span>的效果。
+37. **事倍功半**：[釋義] 費力多而收效少。 [例句] 如果缺乏規劃就盲目行動，往往會<span style="color: red; font-weight: bold;">事倍功半</span>，浪費時間精力。
+38. **力不從心**：[釋義] 心裡想做，但力量不夠。 [例句] 年紀大了之後，他想做些粗重的農活也感到<span style="color: red; font-weight: bold;">力不從心</span>。
+39. **游刃有餘**：[釋義] 比喻做事熟練，從容不迫。 [例句] 憑藉他豐富的經驗，處理這件棘手的案子簡直是<span style="color: red; font-weight: bold;">游刃有餘</span>。
+40. **夜以繼日**：[釋義] 夜晚接著白天，日夜不停。 [例句] 救災人員<span style="color: red; font-weight: bold;">夜以繼日</span>地搶修道路，希望能盡快運送物資。
+41. **孜孜不倦**：[釋義] 勤奮努力，不知疲倦。 [例句] 他<span style="color: red; font-weight: bold;">孜孜不倦</span>地鑽研古籍，終於成為了著名的歷史學家。
+42. **好逸惡勞**：[釋義] 貪圖安逸，厭惡勞動。 [例句] 年輕人應該勤奮向上，切不可養成<span style="color: red; font-weight: bold;">好逸惡勞</span>的壞習慣。
+43. **獨當一面**：[釋義] 獨自擔當一個方面的重任。 [例句] 經過兩年的培訓，他現在已經能<span style="color: red; font-weight: bold;">獨當一面</span>處理部門業務了。
+44. **任勞任怨**：[釋義] 做事不辭勞苦，不怕被埋怨。 [例句] 母親為了家庭<span style="color: red; font-weight: bold;">任勞任怨</span>，付出了一切心力。
+45. **尸位素餐**：[釋義] 占著職位享受俸祿而不做事。 [例句] 政府官員若是<span style="color: red; font-weight: bold;">尸位素餐</span>，不為民服務，必將被人民唾棄。
+46. **精打細算**：[釋義] 在使用人力物力上仔細計算。 [例句] 創業初期資金有限，每一筆開銷都必須<span style="color: red; font-weight: bold;">精打細算</span>。
+47. **因循苟且**：[釋義] 沿襲舊習，敷衍了事。 [例句] 公司若一直<span style="color: red; font-weight: bold;">因循苟且</span>，不求創新，遲早會被市場淘汰。
+48. **分身乏術**：[釋義] 事務繁忙，無法兼顧。 [例句] 這段時間案子太多，經理忙得<span style="color: red; font-weight: bold;">分身乏術</span>，連吃飯時間都沒有。
+49. **大刀闊斧**：[釋義] 比喻辦事果斷，魄力大。 [例句] 新任執行長上任後，<span style="color: red; font-weight: bold;">大刀闊斧</span>地進行了組織改革。
+50. **循序漸進**：[釋義] 按照次序與步驟逐漸推進。 [例句] 健身不能急於求成，必須<span style="color: red; font-weight: bold;">循序漸進</span>以免受傷。
+51. **閉門造車**：[釋義] 比喻不切實際，僅憑主觀辦事。 [例句] 做市場調查不能<span style="color: red; font-weight: bold;">閉門造車</span>，必須走出去了解消費者的真實需求。
+52. **身體力行**：[釋義] 親身體驗，努力實行。 [例句] 環保不能只掛在嘴邊，更要<span style="color: red; font-weight: bold;">身體力行</span>去實踐。
+53. **夙夜匪懈**：[釋義] 日夜勤奮，從不懈怠。 [例句] 為了完成這項國家級工程，工程師們<span style="color: red; font-weight: bold;">夙夜匪懈</span>地趕工。
+54. **玩忽職守**：[釋義] 拿職務當兒戲，不認真負責。 [例句] 這名警衛因<span style="color: red; font-weight: bold;">玩忽職守</span>導致竊賊入侵，遭到了嚴厲處分。
+55. **各司其職**：[釋義] 各自負責自己的職務。 [例句] 團隊合作的關鍵在於大家<span style="color: red; font-weight: bold;">各司其職</span>，又能互相支援。
+56. **偷工減料**：[釋義] 施工時簡省工序，削減材料。 [例句] 這棟大樓因為建商<span style="color: red; font-weight: bold;">偷工減料</span>，地震一來就成了危樓。
+57. **勞師動眾**：[釋義] 指動用大量人力物力去做事。 [例句] 為了找一隻貓而<span style="color: red; font-weight: bold;">勞師動眾</span>，動員全村的人，似乎有點小題大作。
+58. **徒勞無功**：[釋義] 白白浪費精力，沒有任何功效。 [例句] 如果方向錯誤，再怎麼努力也是<span style="color: red; font-weight: bold;">徒勞無功</span>。
+59. **竭澤而漁**：[釋義] 比喻只顧眼前利益，不顧長遠。 [例句] 過度開發自然資源無異於<span style="color: red; font-weight: bold;">竭澤而漁</span>，將斷送後代的生存空間。
+60. **馬不停蹄**：[釋義] 比喻忙碌奔波，沒有停歇。 [例句] 剛結束台北的會議，他又<span style="color: red; font-weight: bold;">馬不停蹄</span>地趕往高雄視察工廠。
+
+## 三、事理：影響
+
+61. **潛移默化**：[釋義] 指人的思想性格受環境影響而改變。 [例句] 父母的言行舉止會對孩子產生<span style="color: red; font-weight: bold;">潛移默化</span>的影響。
+62. **耳濡目染**：[釋義] 形容經常聽到看到，無形中受到影響。 [例句] 生長在音樂世家，他從小<span style="color: red; font-weight: bold;">耳濡目染</span>，自然也具備了極高的音樂素養。
+63. **近朱者赤**：[釋義] 比喻接近好人會變好。 [例句] 所謂<span style="color: red; font-weight: bold;">近朱者赤</span>，近墨者黑，交朋友一定要謹慎。
+64. **立竿見影**：[釋義] 比喻立刻見到功效。 [例句] 這項新政策剛實施就收到了<span style="color: red; font-weight: bold;">立竿見影</span>的效果，交通擁堵明顯改善。
+65. **推波助瀾**：[釋義] 比喻從旁助長聲勢。 [例句] 媒體的誇大報導對這場恐慌起到了<span style="color: red; font-weight: bold;">推波助瀾</span>的作用。
+66. **舉足輕重**：[釋義] 指處於重要地位，一舉一動都影響全局。 [例句] 他在公司的地位<span style="color: red; font-weight: bold;">舉足輕重</span>，任何決定都需要他的同意。
+67. **無足輕重**：[釋義] 無關緊要，不值得重視。 [例句] 這點小損失對整各集團來說<span style="color: red; font-weight: bold;">無足輕重</span>，不值得大驚小怪。
+68. **風行草偃**：[釋義] 比喻在上位者以德化民，下必順從。 [例句] 一位有德行的領導者，能產生<span style="color: red; font-weight: bold;">風行草偃</span>的效果，帶動社會風氣。
+69. **上行下效**：[釋義] 上面的人怎麼做，下面的人就跟著做。 [例句] 主管若能以身作則，員工自然<span style="color: red; font-weight: bold;">上行下效</span>，遵守公司規定。
+70. **蔚然成風**：[釋義] 形容事物流行，成為一種風氣。 [例句] 近年來，路跑活動在國內已<span style="color: red; font-weight: bold;">蔚然成風</span>。
+71. **根深蒂固**：[釋義] 比喻基礎牢固，不易動搖。 [例句] 這種重男輕女的觀念在老一輩心中<span style="color: red; font-weight: bold;">根深蒂固</span>，很難一時改變。
+72. **殃及池魚**：[釋義] 比喻無辜受到連累。 [例句] 城門失火，<span style="color: red; font-weight: bold;">殃及池魚</span>，這場貿易戰讓周邊小國也深受其害。
+73. **獨善其身**：[釋義] 只顧保全自己，不管閒事。 [例句] 在亂世之中，許多人選擇<span style="color: red; font-weight: bold;">獨善其身</span>，不願過問世事。
+74. **牽一髮而動全身**：[釋義] 比喻牽動極小部分，會影響全局。 [例句] 這個系統設計緊密，修改任何參數都可能<span style="color: red; font-weight: bold;">牽一髮而動全身</span>。
+75. **耳提面命**：[釋義] 形容懇切教導。 [例句] 老師<span style="color: red; font-weight: bold;">耳提面命</span>地告誡我們，考試時絕對不能作弊。
+76. **春風化雨**：[釋義] 比喻師長和藹親切的教導。 [例句] 李老師四十年的教學生涯，如<span style="color: red; font-weight: bold;">春風化雨</span>般培育了無數英才。
+77. **殺雞儆猴**：[釋義] 比喻懲罰一人以警告眾人。 [例句] 公司開除這名違規的主管，就是為了<span style="color: red; font-weight: bold;">殺雞儆猴</span>，整頓紀律。
+78. **不可磨滅**：[釋義] 無法消除或泯滅。 [例句] 他對國家民主發展的貢獻是<span style="color: red; font-weight: bold;">不可磨滅</span>的。
+79. **息息相關**：[釋義] 形容關係極為密切。 [例句] 環保問題與我們每個人的生活<span style="color: red; font-weight: bold;">息息相關</span>，誰都無法置身事外。
+80. **同氣連枝**：[釋義] 比喻關係親密，如同兄弟手足。 [例句] 這兩個家族<span style="color: red; font-weight: bold;">同氣連枝</span>，數百年來一直互相扶持。
+81. **唇亡齒寒**：[釋義] 比喻關係密切，利害相關。 [例句] 這兩家公司業務互補，若一家倒閉，另一家也會<span style="color: red; font-weight: bold;">唇亡齒寒</span>。
+82. **推己及人**：[釋義] 將心比心，設身處地為人著想。 [例句] 我們應該<span style="color: red; font-weight: bold;">推己及人</span>，多站在別人的立場設想。
+83. **言傳身教**：[釋義] 用言語教導，並以身作則。 [例句] 父母最好的教育方式不是說教，而是<span style="color: red; font-weight: bold;">言傳身教</span>。
+84. **孟母三遷**：[釋義] 形容父母用心良苦，為子女選擇良好環境。 [例句] 為了給孩子好的成長環境，她效法<span style="color: red; font-weight: bold;">孟母三遷</span>，搬到了學區房。
+85. **蝴蝶效應**：[釋義] 微小的變化能帶動連鎖反應，產生巨大影響。 [例句] 一點小小的疏忽可能引發<span style="color: red; font-weight: bold;">蝴蝶效應</span>，導致不可收拾的後果。
+86. **發人深省**：[釋義] 啟發人深刻思考而有所醒悟。 [例句] 這部紀錄片探討了人性的貪婪，結局<span style="color: red; font-weight: bold;">發人深省</span>。
+87. **當頭棒喝**：[釋義] 比喻促人醒悟的警告。 [例句] 朋友的一番嚴厲批評，給了他一記<span style="color: red; font-weight: bold;">當頭棒喝</span>，讓他從迷惘中醒悟。
+88. **撼動人心**：[釋義] 形容使人內心極受感動或震撼。 [例句] 那場演講充滿激情，具有<span style="color: red; font-weight: bold;">撼動人心</span>的力量。
+89. **防微杜漸**：[釋義] 在錯誤剛萌芽時就加以制止，不讓發展。 [例句] 對於青少年的偏差行為，我們必須<span style="color: red; font-weight: bold;">防微杜漸</span>，以免釀成大錯。
+90. **一呼百應**：[釋義] 形容威望高，隨從者眾。 [例句] 這位領袖極具魅力，只要登高一呼，立刻<span style="color: red; font-weight: bold;">一呼百應</span>。
+
+## 四、事理：得失
+
+91. **塞翁失馬**：[釋義] 比喻壞事也可能變好事。 [例句] 這次雖然落榜了，但<span style="color: red; font-weight: bold;">塞翁失馬</span>，焉知非福，也許你會找到更適合的路。
+92. **得不償失**：[釋義] 得到的抵不過失去的。 [例句] 為了省一點小錢而買了容易壞的家電，真是<span style="color: red; font-weight: bold;">得不償失</span>。
+93. **因小失大**：[釋義] 為了小利益而損失大利益。 [例句] 千萬不要為了貪圖一時的快感而吸毒，以免<span style="color: red; font-weight: bold;">因小失大</span>，毀了一生。
+94. **亡羊補牢**：[釋義] 比喻犯錯後及時補救。 [例句] 雖然已經發生了錯誤，但<span style="color: red; font-weight: bold;">亡羊補牢</span>，猶未晚也，現在修正還來得及。
+95. **顧此失彼**：[釋義] 顧了這個，失了那個，無法兼顧。 [例句] 事情太多太雜，讓他處理起來<span style="color: red; font-weight: bold;">顧此失彼</span>，手忙腳亂。
+96. **兩全其美**：[釋義] 做事顧全雙方，使兩方面都得到好處。 [例句] 這方案既能保護環境又能發展經濟，是一個<span style="color: red; font-weight: bold;">兩全其美</span>的辦法。
+97. **一舉兩得**：[釋義] 做一件事同時得到兩方面的好處。 [例句] 騎腳踏車上班既省油錢又能運動，真是<span style="color: red; font-weight: bold;">一舉兩得</span>。
+98. **魚與熊掌**：[釋義] 比喻兩者不可兼得。 [例句] 事業與家庭有時如<span style="color: red; font-weight: bold;">魚與熊掌</span>不可兼得，必須做出取捨。
+99. **飲鴆止渴**：[釋義] 比喻只求解決眼前困難，不顧嚴重後果。 [例句] 借高利貸來還債無異於<span style="color: red; font-weight: bold;">飲鴆止渴</span>，只會讓財務黑洞越來越大。
+100. **偷雞不著蝕把米**：[釋義] 比喻想占便宜反而吃了虧。 [例句] 他本想詐騙別人，結果反而被騙，真是<span style="color: red; font-weight: bold;">偷雞不著蝕把米</span>。
+101. **賠了夫人又折兵**：[釋義] 比喻不但沒占到便宜，反而吃了大虧。 [例句] 這次侵略戰爭失敗，敵國不僅損兵折將，還割地賠款，簡直是<span style="color: red; font-weight: bold;">賠了夫人又折兵</span>。
+102. **利令智昏**：[釋義] 被利益誘惑，失去理智。 [例句] 他因為<span style="color: red; font-weight: bold;">利令智昏</span>，竟然挪用公款去賭博。
+103. **鷸蚌相爭**：[釋義] 比喻雙方爭執不下，兩敗俱傷，讓第三者得利。 [例句] 你們兩家公司惡性競爭，最後只會讓第三方得利，演變成<span style="color: red; font-weight: bold;">鷸蚌相爭</span>，漁翁得利。
+104. **捨本逐末**：[釋義] 拋棄根本，追求枝節。比喻輕重倒置。 [例句] 教育若只重視分數而忽略品德，那就是<span style="color: red; font-weight: bold;">捨本逐末</span>了。
+105. **貪小失大**：[釋義] 貪圖小利而損失大利。 [例句] 不要因為<span style="color: red; font-weight: bold;">貪小失大</span>，為了免費贈品而洩漏個人個資。
+106. **坐享其成**：[釋義] 自己不出力，享受別人的成果。 [例句] 團隊合作時，最忌諱有人不出力卻想<span style="color: red; font-weight: bold;">坐享其成</span>。
+107. **不勞而獲**：[釋義] 不勞動而獲得成果。 [例句] 天下沒有白吃的午餐，想要成功就不能存有<span style="color: red; font-weight: bold;">不勞而獲</span>的心態。
+108. **損人不利己**：[釋義] 損害別人，自己也沒好處。 [例句] 隨地亂丟垃圾這種<span style="color: red; font-weight: bold;">損人不利己</span>的行為，實在缺乏公德心。
+109. **相得益彰**：[釋義] 互相配合，更能顯出長處。 [例句] 這紅酒配上牛排，味道<span style="color: red; font-weight: bold;">相得益彰</span>，更加美味。
+110. **自討苦吃**：[釋義] 自己找麻煩吃苦頭。 [例句] 明明知道那是陷阱還往裡跳，你這根本是<span style="color: red; font-weight: bold;">自討苦吃</span>。
+111. **功虧一簣**：[釋義] 比喻事情只差最後一步而失敗。 [例句] 眼看就要登頂了，他卻因為體力不支放棄，真是<span style="color: red; font-weight: bold;">功虧一簣</span>。
+112. **前功盡棄**：[釋義] 以前的努力全部廢棄。 [例句] 如果現在停止實驗，之前所有的努力都會<span style="color: red; font-weight: bold;">前功盡棄</span>。
+113. **撿了芝麻丟了西瓜**：[釋義] 比喻抓了小頭，丟了大頭。 [例句] 為了省幾分鐘時間而闖紅燈出車禍，這就是<span style="color: red; font-weight: bold;">撿了芝麻丟了西瓜</span>。
+114. **殺雞取卵**：[釋義] 比喻貪圖眼前微小利益，斷絕長遠利益。 [例句] 為了短期獲利而變賣公司核心資產，無異於<span style="color: red; font-weight: bold;">殺雞取卵</span>。
+115. **買櫝還珠**：[釋義] 比喻捨本逐末，取捨失當。 [例句] 這本書的贈品比書還吸引人，不少讀者<span style="color: red; font-weight: bold;">買櫝還珠</span>，只為了拿贈品。
+116. **權衡輕重**：[釋義] 衡量事物的重要性。 [例句] 在做決定之前，必須先<span style="color: red; font-weight: bold;">權衡輕重</span>，分析利弊得失。
+117. **失之東隅**：[釋義] 比喻雖然先輸了，但最後得到補償。 [例句] 雖然這次比賽輸了，但我學到了寶貴經驗，可謂<span style="color: red; font-weight: bold;">失之東隅</span>，收之桑榆。
+118. **寅吃卯糧**：[釋義] 比喻入不敷出，預先借支。 [例句] 他花錢大手大腳，每個月都<span style="color: red; font-weight: bold;">寅吃卯糧</span>，債台高築。
+119. **利弊參半**：[釋義] 好處和壞處各占一半。 [例句] 這項開發案對當地經濟和環境的影響<span style="color: red; font-weight: bold;">利弊參半</span>，需要謹慎評估。
+120. **如願以償**：[釋義] 願望得到滿足。 [例句] 經過多年的努力，他終於<span style="color: red; font-weight: bold;">如願以償</span>考上了理想的大學。
+
+## 五、事理：情勢
+
+121. **千鈞一髮**：[釋義] 比喻情況極其危急。 [例句] 就在車子快要撞上行人的<span style="color: red; font-weight: bold;">千鈞一髮</span>之際，司機緊急煞車停住了。
+122. **勢如破竹**：[釋義] 形容作戰或工作進展順利，毫無阻礙。 [例句] 我軍士氣高昂，<span style="color: red; font-weight: bold;">勢如破竹</span>，接連攻下了好幾座城池。
+123. **四面楚歌**：[釋義] 比喻陷入四面受敵，孤立無援的境地。 [例句] 公司資金斷裂，競爭對手又聯合打壓，處境已是<span style="color: red; font-weight: bold;">四面楚歌</span>。
+124. **迫在眉睫**：[釋義] 形容事情十分緊急。 [例句] 水源枯竭的問題<span style="color: red; font-weight: bold;">迫在眉睫</span>，政府必須立刻採取限水措施。
+125. **岌岌可危**：[釋義] 形容非常危險，隨時可能崩塌。 [例句] 這座古橋年久失修，在洪水的沖刷下顯得<span style="color: red; font-weight: bold;">岌岌可危</span>。
+126. **大勢已去**：[釋義] 指局勢已無法挽回。 [例句] 看到比分落後太多，教練知道<span style="color: red; font-weight: bold;">大勢已去</span>，只能換上替補球員練兵。
+127. **一觸即發**：[釋義] 比喻形勢緊張，馬上可能發生衝突。 [例句] 邊境局勢緊張，雙方軍隊對峙，戰爭<span style="color: red; font-weight: bold;">一觸即發</span>。
+128. **燃眉之急**：[釋義] 比喻非常緊迫的事。 [例句] 這筆借款剛好解決了他的<span style="color: red; font-weight: bold;">燃眉之急</span>，讓他能支付母親的手術費。
+129. **孤立無援**：[釋義] 獨自一人，沒有外援。 [例句] 他在野外迷路，手機沒訊號，陷入了<span style="color: red; font-weight: bold;">孤立無援</span>的絕境。
+130. **箭在弦上**：[釋義] 比喻勢在必行。 [例句] 行動計畫已經啟動，<span style="color: red; font-weight: bold;">箭在弦上</span>，不得不發。
+131. **騎虎難下**：[釋義] 比喻事情進行中途，進退兩難。 [例句] 他答應了接手這個爛攤子，現在是<span style="color: red; font-weight: bold;">騎虎難下</span>，想退也退不了。
+132. **刻不容緩**：[釋義] 形容情勢緊迫，一刻也不允許拖延。 [例句] 救災如救火，時間<span style="color: red; font-weight: bold;">刻不容緩</span>，我們必須馬上出發。
+133. **風聲鶴唳**：[釋義] 形容驚慌疑懼，自相驚擾。 [例句] 戰敗後的士兵<span style="color: red; font-weight: bold;">風聲鶴唳</span>，草木皆兵，一點風吹草動就嚇得發抖。
+134. **如日中天**：[釋義] 比喻事物正發展到最興盛的階段。 [例句] 這家科技公司的股價<span style="color: red; font-weight: bold;">如日中天</span>，市值不斷創新高。
+135. **江河日下**：[釋義] 比喻情況一天天壞下去。 [例句] 傳統報業的影響力<span style="color: red; font-weight: bold;">江河日下</span>，不得不轉型數位化。
+136. **方興未艾**：[釋義] 事物正在發展，尚未停止。 [例句] 人工智慧的應用目前正<span style="color: red; font-weight: bold;">方興未艾</span>，未來發展潛力無窮。
+137. **如履薄冰**：[釋義] 比喻處境危險或行事極為謹慎。 [例句] 在這樣嚴苛的老闆手下工作，大家都過得<span style="color: red; font-weight: bold;">如履薄冰</span>，深怕犯錯。
+138. **劍拔弩張**：[釋義] 形容情勢緊張，一觸即發。 [例句] 會議室裡的氣氛<span style="color: red; font-weight: bold;">劍拔弩張</span>，雙方代表互不相讓。
+139. **泰山壓頂**：[釋義] 比喻壓力極大。 [例句] 面對如此巨大的債務，他感到如<span style="color: red; font-weight: bold;">泰山壓頂</span>般喘不過氣。
+140. **勢不兩立**：[釋義] 雙方矛盾極深，不能並存。 [例句] 正義與邪惡自古以來就是<span style="color: red; font-weight: bold;">勢不兩立</span>的。
+141. **大局已定**：[釋義] 整個局勢已經決定，無法改變。 [例句] 選舉開票過半，現任市長遙遙領先，<span style="color: red; font-weight: bold;">大局已定</span>。
+142. **柳暗花明**：[釋義] 比喻絕處逢生，出現轉機。 [例句] 本以為走投無路，沒想到遇到貴人相助，真是<span style="color: red; font-weight: bold;">柳暗花明</span>又一村。
+143. **絕處逢生**：[釋義] 在絕望中找到生路。 [例句] 他在空難中<span style="color: red; font-weight: bold;">絕處逢生</span>，奇蹟似地活了下來。
+144. **腹背受敵**：[釋義] 前後都受到敵人攻擊。 [例句] 我軍深入敵境，結果遭到伏擊，<span style="color: red; font-weight: bold;">腹背受敵</span>，情況危急。
+145. **進退維谷**：[釋義] 前進後退都困難，處境困窘。 [例句] 前面是懸崖，後面有追兵，他陷入了<span style="color: red; font-weight: bold;">進退維谷</span>的境地。
+146. **水深火熱**：[釋義] 比喻生活極其痛苦。 [例句] 戰亂地區的人民生活在<span style="color: red; font-weight: bold;">水深火熱</span>之中，急需國際援助。
+147. **安如泰山**：[釋義] 形容非常穩固，不可動搖。 [例句] 即使外面風雨交加，這座堅固的堡壘依然<span style="color: red; font-weight: bold;">安如泰山</span>。
+148. **固若金湯**：[釋義] 形容防守極為嚴密。 [例句] 這座城池防守嚴密，<span style="color: red; font-weight: bold;">固若金湯</span>，敵軍久攻不下。
+149. **危如累卵**：[釋義] 比喻情勢非常危險。 [例句] 這家銀行充滿壞帳，財務狀況<span style="color: red; font-weight: bold;">危如累卵</span>，隨時可能倒閉。
+150. **山雨欲來**：[釋義] 比喻重大事件發生前的緊張氣氛。 [例句] 雖然現在看起來平靜，但總有一種<span style="color: red; font-weight: bold;">山雨欲來</span>風滿樓的壓抑感。
+
+## 六、事理：成敗
+
+151. **功敗垂成**：[釋義] 事情快要成功時，卻失敗了。 [例句] 這項實驗在最後階段數據出錯，導致<span style="color: red; font-weight: bold;">功敗垂成</span>，十分可惜。
+152. **一敗塗地**：[釋義] 形容失敗得十分慘重。 [例句] 由於戰略錯誤，這支球隊在決賽中輸得<span style="color: red; font-weight: bold;">一敗塗地</span>。
+153. **旗開得勝**：[釋義] 比喻事情一開始就取得好成績。 [例句] 第一場比賽就<span style="color: red; font-weight: bold;">旗開得勝</span>，為隊員們帶來了極大的信心。
+154. **東山再起**：[釋義] 比喻失敗後重新恢復勢力。 [例句] 經歷破產後，他並沒有氣餒，立志要<span style="color: red; font-weight: bold;">東山再起</span>。
+155. **馬到成功**：[釋義] 形容事情順利，一開始就取得成功。 [例句] 祝你這次出差談判順利，<span style="color: red; font-weight: bold;">馬到成功</span>！
+156. **捲土重來**：[釋義] 比喻失敗後重整旗鼓再來。 [例句] 失敗了不要緊，整理好心情，明年我們可以<span style="color: red; font-weight: bold;">捲土重來</span>。
+157. **大功告成**：[釋義] 指巨大的工程或任務完成。 [例句] 經過三個月的裝修，新家終於<span style="color: red; font-weight: bold;">大功告成</span>，可以入住了。
+158. **前車之鑑**：[釋義] 比喻前人的失敗經驗，可作為後人的教訓。 [例句] 我們應該將他的失敗視為<span style="color: red; font-weight: bold;">前車之鑑</span>，避免重蹈覆轍。
+159. **重蹈覆轍**：[釋義] 重新走上翻過車的老路，比喻不吸取教訓，重犯錯誤。 [例句] 如果你是吸取教訓，下次一定會<span style="color: red; font-weight: bold;">重蹈覆轍</span>。
+160. **出奇制勝**：[釋義] 用奇兵或奇計取勝。 [例句] 在這場商戰中，他運用了<span style="color: red; font-weight: bold;">出奇制勝</span>的策略，成功搶佔市場。
+161. **百戰百勝**：[釋義] 形容善於作戰，所向無敵。 [例句] 這支特種部隊訓練有素，在戰場上幾乎是<span style="color: red; font-weight: bold;">百戰百勝</span>。
+162. **屢戰屢敗**：[釋義] 每次打仗都失敗。 [例句] 雖然<span style="color: red; font-weight: bold;">屢戰屢敗</span>，國父孫中山先生依然堅持革命，終於建立了民國。
+163. **名落孫山**：[釋義] 指考試或選拔落榜。 [例句] 放榜了，他不幸<span style="color: red; font-weight: bold;">名落孫山</span>，心情非常低落。
+164. **金榜題名**：[釋義] 指考試被錄取。 [例句] 十年寒窗無人問，一舉<span style="color: red; font-weight: bold;">金榜題名</span>天下知。
+165. **水到渠成**：[釋義] 比喻條件成熟，事情自然成功。 [例句] 只要平時準備充分，機會來臨時自然<span style="color: red; font-weight: bold;">水到渠成</span>。
+166. **迎刃而解**：[釋義] 比喻問題容易解決。 [例句] 只要找到問題的核心，其他枝節問題就能<span style="color: red; font-weight: bold;">迎刃而解</span>。
+167. **坐以待斃**：[釋義] 坐著等死，比喻面臨危機不主動解決。 [例句] 我們不能<span style="color: red; font-weight: bold;">坐以待斃</span>，必須主動出擊尋找生路。
+168. **一蹶不振**：[釋義] 跌了一跤就站不起來，比喻遭受挫折後無法振作。 [例句] 遭受這次打擊後，他從此<span style="color: red; font-weight: bold;">一蹶不振</span>，整日借酒澆愁。
+169. **曇花一現**：[釋義] 比喻美好的事物短暫出現。 [例句] 那位歌手紅極一時，可惜如<span style="color: red; font-weight: bold;">曇花一現</span>，很快就被大眾遺忘了。
+170. **勢在必得**：[釋義] 形容決心很大，非得到不可。 [例句] 對於這次的冠軍獎盃，我們全隊上下都是<span style="color: red; font-weight: bold;">勢在必得</span>。
+171. **望塵莫及**：[釋義] 遠遠落在後面，追趕不上。 [例句] 他的跑步速度快得驚人，讓其他選手<span style="color: red; font-weight: bold;">望塵莫及</span>。
+172. **脫穎而出**：[釋義] 比喻才華顯露，超越眾人。 [例句] 在眾多應徵者中，他憑藉著流利的外語能力<span style="color: red; font-weight: bold;">脫穎而出</span>。
+173. **獨占鰲頭**：[釋義] 佔據首位，獲得第一名。 [例句] 這次數學競賽，小明以滿分成績<span style="color: red; font-weight: bold;">獨占鰲頭</span>。
+174. **鎩羽而歸**：[釋義] 比喻失敗或不得志而歸。 [例句] 客隊在主場球迷的噓聲中表現失常，最終<span style="color: red; font-weight: bold;">鎩羽而歸</span>。
+175. **凱旋而歸**：[釋義] 打勝仗回來。 [例句] 戰士們打贏了勝仗，<span style="color: red; font-weight: bold;">凱旋而歸</span>，受到民眾熱烈歡迎。
+176. **一步登天**：[釋義] 比喻一下子達到極高的境界或地位。 [例句] 成功需要腳踏實地，別妄想能<span style="color: red; font-weight: bold;">一步登天</span>。
+177. **大器晚成**：[釋義] 比喻大才之人成就較晚。 [例句] 有些藝術家是<span style="color: red; font-weight: bold;">大器晚成</span>，到了中年才展現出驚人的才華。
+178. **夙願得償**：[釋義] 實現了長久以來的願望。 [例句] 他終於買回了祖宅，多年的<span style="color: red; font-weight: bold;">夙願得償</span>，激動得熱淚盈眶。
+179. **付諸東流**：[釋義] 比喻希望落空，前功盡棄。 [例句] 因為一場大火，他畢生的心血都<span style="color: red; font-weight: bold;">付諸東流</span>了。
+180. **所向披靡**：[釋義] 比喻力量強大，敵人都潰敗。 [例句] 這支鐵騎部隊當年橫掃歐亞大陸，<span style="color: red; font-weight: bold;">所向披靡</span>。
+
+## 七、事理：數量
+
+181. **不計其數**：[釋義] 數量很多，無法計算。 [例句] 天上的星星<span style="color: red; font-weight: bold;">不計其數</span>，數也數不清。
+182. **寥寥無幾**：[釋義] 數量極少。 [例句] 這場演講內容枯燥，台下的聽眾<span style="color: red; font-weight: bold;">寥寥無幾</span>。
+183. **鳳毛麟角**：[釋義] 比喻稀有而珍貴的人或事物。 [例句] 在偏鄉地區，擁有博士學位的人簡直是<span style="color: red; font-weight: bold;">鳳毛麟角</span>。
+184. **汗牛充棟**：[釋義] 形容書籍極多。 [例句] 這間圖書館的藏書<span style="color: red; font-weight: bold;">汗牛充棟</span>，是學術研究的寶庫。
+185. **屈指可數**：[釋義] 扳著手指就能數得出來，形容數量很少。 [例句] 這座城市裡保持完整的古蹟已經<span style="color: red; font-weight: bold;">屈指可數</span>了。
+186. **多如牛毛**：[釋義] 形容數量極多。 [例句] 這裡的蚊子<span style="color: red; font-weight: bold;">多如牛毛</span>，晚上根本不敢出門。
+187. **比比皆是**：[釋義] 到處都是，形容數量很多。 [例句] 在那個動盪的年代，流離失所的難民<span style="color: red; font-weight: bold;">比比皆是</span>。
+188. **車水馬龍**：[釋義] 形容車輛往來不絕，繁華熱鬧。 [例句] 繁華的街道上<span style="color: red; font-weight: bold;">車水馬龍</span>，熱鬧非凡。
+189. **門可羅雀**：[釋義] 門前冷清，可張網捕雀。形容賓客稀少。 [例句] 這家店因為服務態度差，現在已經是<span style="color: red; font-weight: bold;">門可羅雀</span>，沒什麼客人了。
+190. **人山人海**：[釋義] 形容聚集的人極多。 [例句] 跨年晚會的現場<span style="color: red; font-weight: bold;">人山人海</span>，擠得水洩不通。
+191. **九牛一毛**：[釋義] 比喻極大數量中的極微小部分。 [例句] 這一點捐款對這位億萬富翁來說，不過是<span style="color: red; font-weight: bold;">九牛一毛</span>。
+192. **滄海一粟**：[釋義] 比喻非常渺小。 [例句] 人類在浩瀚的宇宙中，渺小得如同<span style="color: red; font-weight: bold;">滄海一粟</span>。
+193. **千篇一律**：[釋義] 形容事物只有一種形式，沒有變化。 [例句] 這幾篇文章的內容<span style="color: red; font-weight: bold;">千篇一律</span>，毫無新意。
+194. **層出不窮**：[釋義] 接連不斷地出現。 [例句] 新的詐騙手法<span style="color: red; font-weight: bold;">層出不窮</span>，大家一定要提高警覺。
+195. **接二連三**：[釋義] 一個接著一個。 [例句] 最近壞消息<span style="color: red; font-weight: bold;">接二連三</span>地傳來，讓他心情十分沉重。
+196. **舉不勝舉**：[釋義] 列舉不完，形容數量很多。 [例句] 好人好事的例子<span style="color: red; font-weight: bold;">舉不勝舉</span>，證明社會處處有溫情。
+197. **堆積如山**：[釋義] 堆得像山一樣高，形容極多。 [例句] 待處理的文件在桌上<span style="color: red; font-weight: bold;">堆積如山</span>，讓他不知從何下手。
+198. **掛一漏萬**：[釋義] 形容列舉不周，遺漏很多。 [例句] 我的報告難免<span style="color: red; font-weight: bold;">掛一漏萬</span>，還請各位專家多多補充指正。
+199. **多多益善**：[釋義] 越多越好。 [例句] 對於救災物資，當然是<span style="color: red; font-weight: bold;">多多益善</span>，希望能幫助更多災民。
+200. **罄其所有**：[釋義] 拿出身邊所有的東西。 [例句] 他為了救治生病的母親，<span style="color: red; font-weight: bold;">罄其所有</span>，花光了積蓄。
+201. **琳瑯滿目**：[釋義] 形容各種美好的事物很多。 [例句] 商店裡展示的商品<span style="color: red; font-weight: bold;">琳瑯滿目</span>，讓人看得眼花撩亂。
+202. **萬人空巷**：[釋義] 形容慶祝或轟動一時的盛況。 [例句] 巨星來訪的消息一出，全城<span style="color: red; font-weight: bold;">萬人空巷</span>，爭相目睹風采。
+203. **碩果僅存**：[釋義] 比喻經過變故後，留存下來的稀有的人或物。 [例句] 他是那場戰役中<span style="color: red; font-weight: bold;">碩果僅存</span>的老兵，見證了歷史的殘酷。
+204. **包羅萬象**：[釋義] 內容豐富，應有盡有。 [例句] 網際網路上的資訊<span style="color: red; font-weight: bold;">包羅萬象</span>，幾乎什麼都找得到。
+205. **絕無僅有**：[釋義] 極其稀有，只有一個。 [例句] 這樣精美的瓷器，世上<span style="color: red; font-weight: bold;">絕無僅有</span>，價值連城。
+206. **千頭萬緒**：[釋義] 形容事情複雜，頭緒繁多。 [例句] 面對這複雜的案情，警探感到<span style="color: red; font-weight: bold;">千頭萬緒</span>，理不出頭緒。
+207. **成千上萬**：[釋義] 形容數量極多。 [例句] 每年春天，<span style="color: red; font-weight: bold;">成千上萬</span>的遊客湧入武陵農場賞櫻。
+208. **微乎其微**：[釋義] 形容非常微小。 [例句] 這次中獎的機率雖然<span style="color: red; font-weight: bold;">微乎其微</span>，但他還是想買張彩券試試運氣。
+209. **恆河沙數**：[釋義] 比喻數量極多，無法計算。 [例句] 佛經中常以<span style="color: red; font-weight: bold;">恆河沙數</span>來形容數量之多，無法計算。
+210. **獨一無二**：[釋義] 只有這一個，沒有第二個。 [例句] 每個人的指紋都是<span style="color: red; font-weight: bold;">獨一無二</span>的，可以用來辨識身分。
+
+## 八、事理：正誤
+
+211. **顛倒是非**：[釋義] 混淆對錯，指鹿為馬。 [例句] 黑心媒體為了博眼球，竟然<span style="color: red; font-weight: bold;">顛倒是非</span>，抹黑無辜的人。
+212. **指鹿為馬**：[釋義] 比喻故意顛倒黑白，混淆是非。 [例句] 在權勢面前，有些人為了奉承上司，不惜<span style="color: red; font-weight: bold;">指鹿為馬</span>，扭曲事實。
+213. **撥亂反正**：[釋義] 消除混亂局面，恢復正常秩序。 [例句] 這位新君主登基後，致力於<span style="color: red; font-weight: bold;">撥亂反正</span>，平反了許多冤獄。
+214. **不刊之論**：[釋義] 形容言論正確，不可磨滅。 [例句] 這篇社論分析透徹，見解精闢，堪稱<span style="color: red; font-weight: bold;">不刊之論</span>。
+215. **混淆視聽**：[釋義] 混淆是非，轉移視線。 [例句] 嫌犯試圖製造假證據來<span style="color: red; font-weight: bold;">混淆視聽</span>，誤導警方辦案。
+216. **斷章取義**：[釋義] 截取文章片段，不顧全篇原意。 [例句] 你不能把我的話<span style="color: red; font-weight: bold;">斷章取義</span>，這會曲解我的原意。
+217. **歪理十八條**：[釋義] 形容強詞奪理，理由很多。 [例句] 他明明做錯了，卻還講出一堆<span style="color: red; font-weight: bold;">歪理十八條</span>來辯解。
+218. **理直氣壯**：[釋義] 理由充分，說話氣勢壯盛。 [例句] 因為他沒做虧心事，所以面對質疑時顯得<span style="color: red; font-weight: bold;">理直氣壯</span>。
+219. **強詞奪理**：[釋義] 沒理硬說成有理。 [例句] 證據確鑿，你再怎麼<span style="color: red; font-weight: bold;">強詞奪理</span>也無法掩蓋真相。
+220. **實事求是**：[釋義] 依據實際情況，探求真理。 [例句] 做學問要<span style="color: red; font-weight: bold;">實事求是</span>，不能憑空捏造數據。
+221. **是非分明**：[釋義] 對錯分辨得很清楚。 [例句] 他是一個<span style="color: red; font-weight: bold;">是非分明</span>的人，絕不會包庇壞人。
+222. **將錯就錯**：[釋義] 既然錯了，就順著錯誤做下去。 [例句] 既然已經寫錯字了，又沒立可白，他只好<span style="color: red; font-weight: bold;">將錯就錯</span>，在旁邊畫個圖掩飾。
+223. **積非成是**：[釋義] 長期累積的錯誤，被誤認為是正確的。 [例句] 大家長期誤用這個成語，久而久之<span style="color: red; font-weight: bold;">積非成是</span>，反而變成通用的用法了。
+224. **無中生有**：[釋義] 憑空捏造，毫無根據。 [例句] 這些八卦新聞純屬<span style="color: red; font-weight: bold;">無中生有</span>，根本沒有事實根據。
+225. **倒果為因**：[釋義] 把結果當成原因。 [例句] 你把失敗歸咎於運氣不好，而不檢討自己不努力，根本是<span style="color: red; font-weight: bold;">倒果為因</span>。
+226. **正本清源**：[釋義] 從根本上整頓，徹底解決問題。 [例句] 要解決社會亂象，必須<span style="color: red; font-weight: bold;">正本清源</span>，從教育著手。
+227. **欲蓋彌彰**：[釋義] 想要掩蓋真相，反而暴露得更明顯。 [例句] 他解釋得越多，越顯得心虛，真是<span style="color: red; font-weight: bold;">欲蓋彌彰</span>。
+228. **信口雌黃**：[釋義] 比喻不顧事實，隨口亂說。 [例句] 你沒有證據就別在這裡<span style="color: red; font-weight: bold;">信口雌黃</span>，隨意污衊別人。
+229. **名正言順**：[釋義] 名義正當，道理也說得通。 [例句] 經過董事會批准，他現在<span style="color: red; font-weight: bold;">名正言順</span>地成為了新任董事長。
+230. **大謬不然**：[釋義] 大錯特錯，完全不是這樣。 [例句] 如果你認為這只是小感冒而不去就醫，那就<span style="color: red; font-weight: bold;">大謬不然</span>了，可能會演變成肺炎。
+231. **似是而非**：[釋義] 表面像對的，實際上是錯的。 [例句] 這種<span style="color: red; font-weight: bold;">似是而非</span>的理論最容易誤導初學者。
+232. **蓋棺論定**：[釋義] 指人死後，其一生的評價才能確定。 [例句] 一個人的歷史評價，往往要等到他去世後才能<span style="color: red; font-weight: bold;">蓋棺論定</span>。
+233. **混為一談**：[釋義] 把不同的事物混在一起，不加區別。 [例句] 公事和私事應該分開處理，不能<span style="color: red; font-weight: bold;">混為一談</span>。
+234. **言之鑿鑿**：[釋義] 形容說得非常確實。 [例句] 他說得<span style="color: red; font-weight: bold;">言之鑿鑿</span>，讓人不得不相信他是親眼所見。
+235. **張冠李戴**：[釋義] 比喻弄錯對象或事實。 [例句] 你把李白的詩說成是杜甫寫的，真是<span style="color: red; font-weight: bold;">張冠李戴</span>。
+236. **一語道破**：[釋義] 一句話就說穿了真相。 [例句] 偵探<span style="color: red; font-weight: bold;">一語道破</span>了兇手的不在場證明是偽造的。
+237. **自圓其說**：[釋義] 自己解釋自己的說法，使無破綻。 [例句] 他的謊言破綻百出，已經無法<span style="color: red; font-weight: bold;">自圓其說</span>了。
+238. **真知灼見**：[釋義] 正確而透徹的見解。 [例句] 這本書對未來趨勢的預測充滿了<span style="color: red; font-weight: bold;">真知灼見</span>。
+239. **不攻自破**：[釋義] 不用攻擊，自己就潰敗了。比喻論點站不住腳。 [例句] 只要我們拿出監視器畫面，他的謊言就會<span style="color: red; font-weight: bold;">不攻自破</span>。
+240. **金科玉律**：[釋義] 比喻不可改變的規則或信條。 [例句] 這條規則曾被視為業界的<span style="color: red; font-weight: bold;">金科玉律</span>，如今卻已過時。
+
+## 九、事理：狀態
+
+241. **井井有條**：[釋義] 形容整齊有序。 [例句] 她的房間總是整理得<span style="color: red; font-weight: bold;">井井有條</span>，一塵不染。
+242. **雜亂無章**：[釋義] 亂七八糟，沒有條理。 [例句] 這篇文章結構鬆散，內容<span style="color: red; font-weight: bold;">雜亂無章</span>，讓人看不懂重點。
+243. **煥然一新**：[釋義] 形容變得嶄新，像新的一樣。 [例句] 重新粉刷後，這棟老房子看起來<span style="color: red; font-weight: bold;">煥然一新</span>。
+244. **亂七八糟**：[釋義] 形容非常混亂。 [例句] 風災過後，街道上一片<span style="color: red; font-weight: bold;">亂七八糟</span>，滿地都是招牌和樹枝。
+245. **錯落有致**：[釋義] 交錯紛雜但有條理，很有情趣。 [例句] 這些庭園造景高低起伏，<span style="color: red; font-weight: bold;">錯落有致</span>，極具美感。
+246. **密密麻麻**：[釋義] 形容又多又密。 [例句] 這張紙上寫滿了<span style="color: red; font-weight: bold;">密密麻麻</span>的小字，看得我眼睛都花了。
+247. **空空如也**：[釋義] 空空的，什麼都沒有。 [例句] 打開冰箱，裡面<span style="color: red; font-weight: bold;">空空如也</span>，看來得去超市補貨了。
+248. **琳瑯滿目**：[釋義] 形容美好的事物很多。 [例句] 貨架上<span style="color: red; font-weight: bold;">琳瑯滿目</span>的商品讓人不知從何選起。
+249. **支離破碎**：[釋義] 形容事物零散破碎，不成整體。 [例句] 那個花瓶掉在地上，摔得<span style="color: red; font-weight: bold;">支離破碎</span>。
+250. **完好如初**：[釋義] 完整無缺，和原來一樣。 [例句] 經過修復師的巧手，這幅古畫看起來<span style="color: red; font-weight: bold;">完好如初</span>。
+251. **千瘡百孔**：[釋義] 形容破壞嚴重，或毛病很多。 [例句] 這項政策實施多年，早已顯得<span style="color: red; font-weight: bold;">千瘡百孔</span>，急需改革。
+252. **固若金湯**：[釋義] 形容防禦堅固。 [例句] 這座城堡防禦工事<span style="color: red; font-weight: bold;">固若金湯</span>。
+253. **搖搖欲墜**：[釋義] 形容非常危險，快要倒塌。 [例句] 那塊招牌在強風中<span style="color: red; font-weight: bold;">搖搖欲墜</span>，隨時可能掉下來砸到人。
+254. **根深蒂固**：[釋義] 比喻基礎牢固，不易改變。 [例句] 這個習慣在他身上已經<span style="color: red; font-weight: bold;">根深蒂固</span>。
+255. **瞬息萬變**：[釋義] 形容變化極快。 [例句] 戰場上的局勢<span style="color: red; font-weight: bold;">瞬息萬變</span>，指揮官必須隨機應變。
+256. **一成不變**：[釋義] 墨守成規，不知變通。 [例句] 每天過著<span style="color: red; font-weight: bold;">一成不變</span>的生活，讓他感到有些厭倦。
+257. **風平浪靜**：[釋義] 比喻平靜無事。 [例句] 海面上<span style="color: red; font-weight: bold;">風平浪靜</span>，非常適合出海釣魚。
+258. **波濤洶湧**：[釋義] 形容波浪極大。 [例句] 颱風來襲，海邊<span style="color: red; font-weight: bold;">波濤洶湧</span>，禁止遊客靠近。
+259. **水洩不通**：[釋義] 形容擁擠得連水都流不出去。 [例句] 跨年夜的捷運站被擠得<span style="color: red; font-weight: bold;">水洩不通</span>。
+260. **空前絕後**：[釋義] 形容極其盛大，前所未有。 [例句] 這場奧運開幕式的盛況可謂<span style="color: red; font-weight: bold;">空前絕後</span>。
+261. **栩栩如生**：[釋義] 形容生動逼真，像活的一樣。 [例句] 這座雕像刻畫得<span style="color: red; font-weight: bold;">栩栩如生</span>，彷彿下一秒就會動起來。
+262. **死氣沉沉**：[釋義] 形容氣氛衰敗，沒有生氣。 [例句] 這個辦公室<span style="color: red; font-weight: bold;">死氣沉沉</span>，大家都埋頭苦幹，沒有半點笑聲。
+263. **生機勃勃**：[釋義] 形容充滿生氣與活力。 [例句] 春天來了，花園裡一片<span style="color: red; font-weight: bold;">生機勃勃</span>的景象。
+264. **星羅棋布**：[釋義] 形容數量多且分布廣。 [例句] 湖面上<span style="color: red; font-weight: bold;">星羅棋布</span>著許多小島，風景秀麗。
+265. **鱗次櫛比**：[釋義] 形容建築物排列整齊密集。 [例句] 港口邊<span style="color: red; font-weight: bold;">鱗次櫛比</span>的高樓大廈，展示著城市的繁榮。
+266. **縱橫交錯**：[釋義] 形容事物錯綜複雜地合在一起。 [例句] 這座城市的地下鐵路線<span style="color: red; font-weight: bold;">縱橫交錯</span>，交通十分便利。
+267. **藕斷絲連**：[釋義] 比喻表面斷了，關係仍未斷絕。 [例句] 他們雖然分手了，但仍<span style="color: red; font-weight: bold;">藕斷絲連</span>，偶爾會互相關心。
+268. **若隱若現**：[釋義] 隱約不明，模糊不清。 [例句] 遠處的山峰在霧氣中<span style="color: red; font-weight: bold;">若隱若現</span>，充滿了神秘感。
+269. **涇渭分明**：[釋義] 比喻是非界限分明。 [例句] 這兩條河匯流處，水色一清一濁，<span style="color: red; font-weight: bold;">涇渭分明</span>。
+270. **模稜兩可**：[釋義] 含糊不清，不置可否。 [例句] 他的回答<span style="color: red; font-weight: bold;">模稜兩可</span>，讓人猜不透他的真正意圖。
+
+## 十、事理：異同
+
+271. **大同小異**：[釋義] 大致相同，只有些微差別。 [例句] 這兩款手機的功能<span style="color: red; font-weight: bold;">大同小異</span>，選哪一隻差別不大。
+272. **天壤之別**：[釋義] 形容差別極大。 [例句] 這裡的生活環境與貧民窟相比，簡直有<span style="color: red; font-weight: bold;">天壤之別</span>。
+273. **如出一轍**：[釋義] 比喻極為相似。 [例句] 這兩起案件的作案手法<span style="color: red; font-weight: bold;">如出一轍</span>，警方懷疑是同一人所為。
+274. **截然不同**：[釋義] 完全不一樣。 [例句] 這對雙胞胎雖然長得像，但個性卻<span style="color: red; font-weight: bold;">截然不同</span>，一個活潑一個內向。
+275. **大相逕庭**：[釋義] 形容彼此相差很遠。 [例句] 他的實際行為與他口中所說的仁義道德<span style="color: red; font-weight: bold;">大相逕庭</span>。
+276. **千篇一律**：(同數量類，亦可形容異同) 這些網紅臉看多了覺得<span style="color: red; font-weight: bold;">千篇一律</span>，毫無特色。
+277. **獨樹一幟**：[釋義] 自成一家，與眾不同。 [例句] 他的畫風大膽創新，在畫壇<span style="color: red; font-weight: bold;">獨樹一幟</span>。
+278. **異曲同工**：[釋義] 比喻做法不同，效果卻一樣好。 [例句] 這兩首曲子雖然風格不同，但在表達悲傷情感上卻有<span style="color: red; font-weight: bold;">異曲同工</span>之妙。
+279. **殊途同歸**：[釋義] 比喻方法不同，但結果一樣。 [例句] 雖然我們使用的方法不同，但目標一致，最終<span style="color: red; font-weight: bold;">殊途同歸</span>，都完成了任務。
+280. **南轅北轍**：[釋義] 比喻行動和目的相反。 [例句] 你想去台北卻往南開，這完全是<span style="color: red; font-weight: bold;">南轅北轍</span>，永遠到不了目的地。
+281. **背道而馳**：[釋義] 比喻彼此方向目標完全相反。 [例句] 公司的政策若與員工的利益<span style="color: red; font-weight: bold;">背道而馳</span>，勢必引起反彈。
+282. **一模一樣**：[釋義] 完全相同。 [例句] 這對母女笑起來的樣子簡直<span style="color: red; font-weight: bold;">一模一樣</span>。
+283. **迥然不同**：[釋義] 形容差別很大。 [例句] 現在的城市面貌與二十年前相比，已經<span style="color: red; font-weight: bold;">迥然不同</span>。
+284. **並駕齊驅**：[釋義] 比喻不分軒輊，實力相當。 [例句] 這兩家公司的市場佔有率<span style="color: red; font-weight: bold;">並駕齊驅</span>，競爭非常激烈。
+285. **各有千秋**：[釋義] 各有各的長處。 [例句] 這兩位書法家的作品<span style="color: red; font-weight: bold;">各有千秋</span>，很難說誰比較好。
+286. **平分秋色**：[釋義] 比喻雙方勢均力敵。 [例句] 這場比賽雙方實力相當，<span style="color: red; font-weight: bold;">平分秋色</span>，最終握手言和。
+287. **伯仲之間**：[釋義] 比喻能力不相上下。 [例句] 他們的棋藝在<span style="color: red; font-weight: bold;">伯仲之間</span>，下了一整天都沒分出勝負。
+288. **判若兩人**：[釋義] 形容前後變化很大，像兩個人一樣。 [例句] 減肥成功後，他看起來與以前<span style="color: red; font-weight: bold;">判若兩人</span>，變得自信帥氣。
+289. **大異其趣**：[釋義] 形容意旨或趣味完全不同。 [例句] 這部續集的風格與第一集<span style="color: red; font-weight: bold;">大異其趣</span>，改走喜劇路線。
+290. **千差萬別**：[釋義] 形容種類多，差別大。 [例句] 世界各地的風俗習慣<span style="color: red; font-weight: bold;">千差萬別</span>，旅行時要學會尊重。
+291. **貌合神離**：[釋義] 表面親近，內心疏遠。 [例句] 這對夫妻在人前恩愛，私底下卻早已<span style="color: red; font-weight: bold;">貌合神離</span>。
+292. **同床異夢**：[釋義] 比喻共同生活或做事，心思卻不同。 [例句] 商業夥伴如果<span style="color: red; font-weight: bold;">同床異夢</span>，各懷鬼胎，合作很難長久。
+293. **同流合汙**：[釋義] 跟壞人一起做壞事。 [例句] 他潔身自愛，不願與那些貪官<span style="color: red; font-weight: bold;">同流合汙</span>。
+294. **近朱者赤**：[釋義] 接近好人會變好。 [例句] 因為<span style="color: red; font-weight: bold;">近朱者赤</span>，他也染上了文人的氣息。
+295. **物以類聚**：[釋義] 同類的東西常聚在一起。 [例句] 所謂<span style="color: red; font-weight: bold;">物以類聚</span>，人以群分，優秀的人總會互相吸引。
+296. **標新立異**：[釋義] 提出新奇的見解或創造新樣式。 [例句] 年輕人喜歡<span style="color: red; font-weight: bold;">標新立異</span>，穿著打扮往往很前衛。
+297. **千人一面**：[釋義] 形容事物千篇一律，沒有特色。 [例句] 這些模特兒的妝容<span style="color: red; font-weight: bold;">千人一面</span>，缺乏個人特色。
+298. **獨具匠心**：[釋義] 具有獨特的巧思。 [例句] 這棟建築的設計<span style="color: red; font-weight: bold;">獨具匠心</span>，巧妙地融合了現代與傳統元素。
+299. **相去無幾**：[釋義] 相差不遠。 [例句] 這兩件商品的價格<span style="color: red; font-weight: bold;">相去無幾</span>，你就挑喜歡的顏色買吧。
+300. **雲泥之別**：[釋義] 比喻差別極大。 [例句] 一個是皇室貴族，一個是平民百姓，身分地位有<span style="color: red; font-weight: bold;">雲泥之別</span>。
+
+## 十一、事理：程度
+
+301. **登峰造極**：[釋義] 達到極高的境界。 [例句] 他的廚藝已經到了<span style="color: red; font-weight: bold;">登峰造極</span>的境界，無人能及。
+302. **無與倫比**：[釋義] 沒有可以相比的。 [例句] 這顆鑽石的璀璨光芒是<span style="color: red; font-weight: bold;">無與倫比</span>的，世間罕見。
+303. **略知皮毛**：[釋義] 只知道一點點表面。 [例句] 對於量子力學，我只是<span style="color: red; font-weight: bold;">略知皮毛</span>，不敢在專家面前班門弄斧。
+304. **深入骨髓**：[釋義] 比喻感受極深。 [例句] 他對那個人的恨意已經<span style="color: red; font-weight: bold;">深入骨髓</span>，無法化解。
+305. **入木三分**：[釋義] 比喻見解深刻。 [例句] 這位演員把角色的奸詐刻畫得<span style="color: red; font-weight: bold;">入木三分</span>，讓人恨得牙癢癢。
+306. **淋漓盡致**：[釋義] 形容文章或說話表達得非常充分透徹。 [例句] 她在電影中將悲傷的情緒發揮得<span style="color: red; font-weight: bold;">淋漓盡致</span>，觀眾無不動容。
+307. **淺嘗輒止**：[釋義] 稍微嘗試一下就停止，不深入研究。 [例句] 學習不能<span style="color: red; font-weight: bold;">淺嘗輒止</span>，必須深入鑽研才能有所成就。
+308. **登堂入室**：[釋義] 比喻學問或技藝循序漸進，達到高深境界。 [例句] 經過大師指點，他的繪畫技巧終於<span style="color: red; font-weight: bold;">登堂入室</span>，達到專業水準。
+309. **爐火純青**：[釋義] 比喻技藝達到完美的境界。 [例句] 他的武術功夫已經練到了<span style="color: red; font-weight: bold;">爐火純青</span>的地步。
+310. **無微不至**：[釋義] 形容關懷照顧得非常細緻周到。 [例句] 護士對病人的照顧<span style="color: red; font-weight: bold;">無微不至</span>，讓家屬非常感激。
+311. **驚天動地**：[釋義] 形容聲勢極大。 [例句] 這場大地震<span style="color: red; font-weight: bold;">驚天動地</span>，造成了嚴重的傷亡。
+312. **微不足道**：[釋義] 渺小得不值一提。 [例句] 這點小傷<span style="color: red; font-weight: bold;">微不足道</span>，貼個OK繃就好了。
+313. **鋪天蓋地**：[釋義] 形容聲勢浩大，到處都是。 [例句] 蝗蟲大軍<span style="color: red; font-weight: bold;">鋪天蓋地</span>而來，瞬間吃光了所有農作物。
+314. **排山倒海**：[釋義] 形容力量巨大，氣勢壯闊。 [例句] 輿論的壓力如<span style="color: red; font-weight: bold;">排山倒海</span>般襲來，迫使他辭職下台。
+315. **不可收拾**：[釋義] 事情糟到無法整理或解決。 [例句] 場面混亂得<span style="color: red; font-weight: bold;">不可收拾</span>，警方不得不出動鎮暴部隊。
+316. **與日俱增**：[釋義] 隨著時間一天天增加。 [例句] 隨著年齡增長，他對故鄉的思念<span style="color: red; font-weight: bold;">與日俱增</span>。
+317. **每況愈下**：[釋義]情況越來越壞。 [例句] 這家公司的營運狀況<span style="color: red; font-weight: bold;">每況愈下</span>，裁員傳聞不斷。
+318. **變本加厲**：[釋義] 比喻情況比原來更嚴重。 [例句] 老師不但沒能制止他，他反而<span style="color: red; font-weight: bold;">變本加厲</span>地欺負同學。
+319. **恰如其分**：[釋義] 指辦事或說話正合分寸。 [例句] 這份禮物送得<span style="color: red; font-weight: bold;">恰如其分</span>，既不貴重也不失禮。
+320. **有過之而無不及**：[釋義] 只有超過，沒有趕不上的。 [例句] 這部續集的精彩程度，與第一集相比<span style="color: red; font-weight: bold;">有過之而無不及</span>。
+321. **不痛不癢**：[釋義] 比喻無關緊要，沒有觸及重點。 [例句] 這種<span style="color: red; font-weight: bold;">不痛不癢</span>的處罰，根本無法讓他們記取教訓。
+322. **舉世無雙**：[釋義] 全世界沒有第二個。 [例句] 長城的雄偉壯觀，在世界上可說是<span style="color: red; font-weight: bold;">舉世無雙</span>。
+323. **嘆為觀止**：(同好壞類，亦可形容程度) 這鬼斧神工的峽谷景色，令人<span style="color: red; font-weight: bold;">嘆為觀止</span>。
+324. **無以復加**：[釋義] 到了極點，無法再增加。 [例句] 他對妻子的寵愛簡直到了<span style="color: red; font-weight: bold;">無以復加</span>的地步。
+325. **刻骨銘心**：[釋義] 形容感受極深，永難忘懷。 [例句] 那段初戀的回憶<span style="color: red; font-weight: bold;">刻骨銘心</span>，讓他至今難以忘懷。
+326. **痛徹心扉**：[釋義] 形容極度悲痛。 [例句] 失去至親的痛苦讓他<span style="color: red; font-weight: bold;">痛徹心扉</span>，久久無法平復。
+327. **微乎其微**：(同數量類，亦可形容程度) 空氣中的有害物質含量<span style="color: red; font-weight: bold;">微乎其微</span>，對人體無害。
+328. **岌岌可危**：(同情勢類，亦可形容程度) 瀕臨絕種的動物數量<span style="color: red; font-weight: bold;">岌岌可危</span>。
+329. **勢不可擋**：[釋義] 氣勢強大，無法阻擋。 [例句] 改革的浪潮<span style="color: red; font-weight: bold;">勢不可擋</span>，舊勢力終將被淘汰。
+330. **登峰造極**：[釋義] 比喻達到頂點。 [例句] 他的無恥程度真是<span style="color: red; font-weight: bold;">登峰造極</span>，連這種錢都敢騙。
+
+## 十二、事理：速度
+
+331. **風馳電掣**：[釋義] 形容速度極快。 [例句] 賽車在跑道上<span style="color: red; font-weight: bold;">風馳電掣</span>地奔馳，快得讓人看不清車號。
+332. **曇花一現**：(同成敗類，亦可形容速度) 美好的時光總是如<span style="color: red; font-weight: bold;">曇花一現</span>般短暫。
+333. **姍姍來遲**：[釋義] 形容來得很晚。 [例句] 主角直到宴會快結束時才<span style="color: red; font-weight: bold;">姍姍來遲</span>，讓大家等了很久。
+334. **一日千里**：[釋義] 形容進步或發展極快。 [例句] 現代科技的發展<span style="color: red; font-weight: bold;">一日千里</span>，稍不留神就會落伍。
+335. **突飛猛進**：[釋義] 進展非常迅速。 [例句] 經過一個暑假的特訓，他的游泳成績<span style="color: red; font-weight: bold;">突飛猛進</span>。
+336. **慢條斯理**：[釋義] 形容動作緩慢，不慌不忙。 [例句] 即使火燒眉毛了，他還是<span style="color: red; font-weight: bold;">慢條斯理</span>地喝著茶，真急死人。
+337. **雷厲風行**：[釋義] 比喻執行政策嚴格迅速。 [例句] 這位局長辦事<span style="color: red; font-weight: bold;">雷厲風行</span>，上任第一天就掃蕩了所有賭場。
+338. **光陰似箭**：[釋義] 形容時間過得很快。 [例句] <span style="color: red; font-weight: bold;">光陰似箭</span>，轉眼間我們都已經大學畢業了。
+339. **白駒過隙**：[釋義] 比喻時間過得極快。 [例句] 人生如<span style="color: red; font-weight: bold;">白駒過隙</span>，我們應該把握當下，珍惜時光。
+340. **稍縱即逝**：[釋義] 稍一放鬆，便會消失。 [例句] 靈感往往<span style="color: red; font-weight: bold;">稍縱即逝</span>，一定要隨身帶著筆記本記錄下來。
+341. **刻不容緩**：(同情勢類，亦可形容速度) 搶救傷患<span style="color: red; font-weight: bold;">刻不容緩</span>，救護車一路鳴笛疾駛。
+342. **勢如破竹**：(同情勢類，亦可形容速度) 我軍進攻速度<span style="color: red; font-weight: bold;">勢如破竹</span>，敵軍根本來不及反應。
+343. **步履蹣跚**：[釋義] 形容走路緩慢搖擺的樣子。 [例句] 老奶奶提著沉重的菜籃，<span style="color: red; font-weight: bold;">步履蹣跚</span>地走在回家的路上。
+344. **健步如飛**：[釋義] 形容走路腳步快而有力。 [例句] 雖然已經七十歲了，爺爺爬起山來依然<span style="color: red; font-weight: bold;">健步如飛</span>。
+345. **流星趕月**：[釋義] 形容速度極快。 [例句] 他騎著馬如<span style="color: red; font-weight: bold;">流星趕月</span>般，連夜趕回京城報信。
+346. **瞬息萬變**：(同狀態類，亦可形容速度) 股市行情<span style="color: red; font-weight: bold;">瞬息萬變</span>，投資人要隨時注意盤勢。
+347. **迅雷不及掩耳**：[釋義] 比喻行動迅速，讓人來不及防備。 [例句] 警方以<span style="color: red; font-weight: bold;">迅雷不及掩耳</span>的速度破門而入，逮捕了毒販。
+348. **蝸行牛步**：[釋義] 形容行動極為緩慢。 [例句] 這條路正在施工，車流<span style="color: red; font-weight: bold;">蝸行牛步</span>，塞車塞得很嚴重。
+349. **不假思索**：[釋義] 用不著思考，形容反應快。 [例句] 他<span style="color: red; font-weight: bold;">不假思索</span>地回答了老師的問題，展現了極佳的反應速度。
+350. **脫口而出**：[釋義] 不假思索，隨口說出。 [例句] 他一時生氣，傷人的話語竟然<span style="color: red; font-weight: bold;">脫口而出</span>。
+351. **七步成詩**：[釋義] 形容才思敏捷。 [例句] 曹植才思敏捷，能<span style="color: red; font-weight: bold;">七步成詩</span>，令人佩服。
+352. **倚馬可待**：[釋義] 形容文思敏捷，寫作迅速。 [例句] 他的文筆極快，寫作文章<span style="color: red; font-weight: bold;">倚馬可待</span>，從不拖稿。
+353. **日新月異**：[釋義] 每天每月都有新的變化。 [例句] 智慧型手機的功能<span style="color: red; font-weight: bold;">日新月異</span>，每年都有新科技問世。
+354. **聞風而至**：[釋義] 一聽到消息就立刻趕來。 [例句] 記者們一聽到有獨家新聞，立刻<span style="color: red; font-weight: bold;">聞風而至</span>。
+355. **一揮而就**：[釋義] 形容才思敏捷，落筆成章。 [例句] 書法大師拿起毛筆，<span style="color: red; font-weight: bold;">一揮而就</span>，寫下了一幅壯麗的墨寶。
+356. **急轉直下**：[釋義] 情況突然轉變，變得非常壞。 [例句] 病情突然<span style="color: red; font-weight: bold;">急轉直下</span>，醫生發出了病危通知。
+357. **緩不濟急**：[釋義] 緩慢的行動救不了緊急的危難。 [例句] 遠水救不了近火，這個方案雖然好，但是<span style="color: red; font-weight: bold;">緩不濟急</span>。
+358. **爭分奪秒**：[釋義] 珍惜每一分每一秒。 [例句] 為了趕在期限前交件，全組人員都在<span style="color: red; font-weight: bold;">爭分奪秒</span>地工作。
+359. **疾言厲色**：[釋義] 說話急躁，神色嚴厲。 [例句] 他因為焦急，說話速度快且<span style="color: red; font-weight: bold;">疾言厲色</span>，把下屬嚇了一跳。
+360. **轉瞬之間**：[釋義] 極短的時間內。 [例句] 剛才還是晴空萬里，<span style="color: red; font-weight: bold;">轉瞬之間</span>烏雲密布，下起了大雨。
+
+## 十三、事理：難易
+
+361. **易如反掌**：[釋義] 像翻手掌一樣容易。 [例句] 對他這個電腦天才來說，修好這台筆電簡直是<span style="color: red; font-weight: bold;">易如反掌</span>。
+362. **舉步維艱**：[釋義] 行走困難，比喻處境艱難。 [例句] 公司資金凍結，業務推展<span style="color: red; font-weight: bold;">舉步維艱</span>，正面臨倒閉危機。
+363. **輕而易舉**：[釋義] 形容事情很容易做。 [例句] 他身材高大，<span style="color: red; font-weight: bold;">輕而易舉</span>地就換好了天花板上的燈泡。
+364. **難如登天**：[釋義] 比喻事情極難辦到。 [例句] 要在茫茫人海中找到失散多年的兄弟，簡直是<span style="color: red; font-weight: bold;">難如登天</span>。
+365. **探囊取物**：[釋義] 比喻事情極容易辦到。 [例句] 憑我軍的實力要攻下這座小城，如同<span style="color: red; font-weight: bold;">探囊取物</span>般容易。
+366. **緣木求魚**：[釋義] 比喻方向錯誤，徒勞無功。 [例句] 想不努力就考上第一志願，無異於<span style="color: red; font-weight: bold;">緣木求魚</span>。
+367. **唾手可得**：[釋義] 比喻極容易得到。 [例句] 冠軍寶座已經<span style="color: red; font-weight: bold;">唾手可得</span>，大家千萬不要在最後關頭鬆懈。
+368. **大海撈針**：[釋義] 比喻東西難找或事情難成。 [例句] 掉在草叢裡的隱形眼鏡，要找回來簡直是<span style="color: red; font-weight: bold;">大海撈針</span>。
+369. **游刃有餘**：(同工作類，亦可形容難易) 這份工作對他來說<span style="color: red; font-weight: bold;">游刃有餘</span>，毫無難度。
+370. **千辛萬苦**：[釋義] 形容非常辛苦。 [例句] 歷經<span style="color: red; font-weight: bold;">千辛萬苦</span>，探險隊終於抵達了極地中心。
+371. **勢如破竹**：(同情勢類，亦可形容難易) 一旦突破了這個技術瓶頸，後續研發便<span style="color: red; font-weight: bold;">勢如破竹</span>，十分順利。
+372. **寸步難行**：[釋義] 形容走路困難，或處境艱難。 [例句] 在暴風雪中，車輛<span style="color: red; font-weight: bold;">寸步難行</span>，交通完全癱瘓。
+373. **得心應手**：[釋義] 形容技藝熟練，運用自如。 [例句] 這把新吉他讓他彈奏起來<span style="color: red; font-weight: bold;">得心應手</span>，音色極佳。
+374. **一蹴可幾**：[釋義] 形容事情很容易成功。 [例句] 羅馬不是一天造成的，成功絕非<span style="color: red; font-weight: bold;">一蹴可幾</span>。
+375. **手到擒來**：[釋義] 比喻做事有把握，不費力。 [例句] 這次的任務對經驗豐富的他來說，絕對是<span style="color: red; font-weight: bold;">手到擒來</span>。
+376. **百折不撓**：[釋義] 意志剛強，即使受挫也不屈服。 [例句] 雖然面對無數困難，他依然<span style="color: red; font-weight: bold;">百折不撓</span>，堅持到底。
+377. **知易行難**：[釋義] 知道容易，實行卻難。 [例句] 很多道理都是<span style="color: red; font-weight: bold;">知易行難</span>，真正做起來才發現不容易。
+378. **迎刃而解**：(同成敗類，亦可形容難易) 只要資金到位，所有的困難都會<span style="color: red; font-weight: bold;">迎刃而解</span>。
+379. **左右逢源**：[釋義] 比喻辦事得心應手，或處世圓滑。 [例句] 他人際關係極好，辦起事來總是<span style="color: red; font-weight: bold;">左右逢源</span>，處處有人幫忙。
+380. **篳路藍縷**：[釋義] 形容創業艱辛。 [例句] 先民們<span style="color: red; font-weight: bold;">篳路藍縷</span>，開墾荒地，才有了我們今天的家園。
+381. **插翅難飛**：[釋義] 比喻難以逃脫。 [例句] 警方已經包圍了這棟大樓，嫌犯就算有通天本領也<span style="color: red; font-weight: bold;">插翅難飛</span>。
+382. **如虎添翼**：[釋義] 比喻強者增添力量，更加強大。 [例句] 有了這位行銷專家的加入，我們的團隊簡直是<span style="color: red; font-weight: bold;">如虎添翼</span>。
+383. **釜底抽薪**：[釋義] 比喻從根本解決問題。 [例句] 想要徹底解決問題，必須採用<span style="color: red; font-weight: bold;">釜底抽薪</span>的辦法，從根本處理。
+384. **盤根錯節**：[釋義] 比喻事情複雜，不易處理。 [例句] 這件貪污案背後的人際關係<span style="color: red; font-weight: bold;">盤根錯節</span>，調查起來非常困難。
+385. **迎難而上**：[釋義] 不怕困難，勇敢前進。 [例句] 面對嚴峻的挑戰，我們不應退縮，而要<span style="color: red; font-weight: bold;">迎難而上</span>。
+386. **水滴石穿**：[釋義] 比喻堅持不懈，集細微之力也能成就難事。 [例句] 只要有恆心，即使是<span style="color: red; font-weight: bold;">水滴石穿</span>的困難也能被克服。
+387. **鐵杵磨針**：[釋義] 比喻有恆心，終能成功。 [例句] 學習要有<span style="color: red; font-weight: bold;">鐵杵磨針</span>的毅力，才能學有所成。
+388. **鞭長莫及**：[釋義] 比喻力量達不到。 [例句] 雖然我很想幫你，但我人在國外，實在是<span style="color: red; font-weight: bold;">鞭長莫及</span>。
+389. **駕輕就熟**：[釋義] 比喻對事情很熟悉，做起來容易。 [例句] 他做這行已經十年了，處理這些業務早已<span style="color: red; font-weight: bold;">駕輕就熟</span>。
+390. **無能為力**：[釋義] 沒有能力幫忙。 [例句] 對於這種絕症，醫生也表示<span style="color: red; font-weight: bold;">無能為力</span>，只能減輕病人的痛苦。`;
+
+        const App = () => {
+            const [parsedData, setParsedData] = useState({});
+            const [categories, setCategories] = useState([]);
+            const [currentMode, setCurrentMode] = useState('menu'); // menu, learn, quiz, setup
+            const [activeCategory, setActiveCategory] = useState(null);
+            const [aiData, setAiData] = useState({});
+            const [isGeneratingAll, setIsGeneratingAll] = useState(false); // Flag for batch generation
+            
+            const [favorites, setFavorites] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('idiomFavorites');
+                    return saved ? JSON.parse(saved) : [];
+                } catch(e) { return []; }
+            });
+
+            useEffect(() => {
+                localStorage.setItem('idiomFavorites', JSON.stringify(favorites));
+            }, [favorites]);
+
+            const toggleFavorite = (id) => {
+                setFavorites(prev => 
+                    prev.includes(id) ? prev.filter(fid => fid !== id) : [...prev, id]
+                );
+            };
+
+            // 學習模式狀態：改為「目前頁數」(0, 1, 2) 代表第1,2,3天
+            const [learnPage, setLearnPage] = useState(0);
+
+            // 測驗模式狀態
+            const [quizQuestions, setQuizQuestions] = useState([]); // Array of quiz question objects
+            const [quizScore, setQuizScore] = useState(0);
+            const [quizPage, setQuizPage] = useState(0); // 新增：測驗頁數狀態
+            const [combo, setCombo] = useState(0); // 新增：Combo 計數
+            
+            // 設定模式狀態
+            const [rawText, setRawText] = useState(FULL_DATA_SOURCE);
+
+            // 解析 Markdown 資料
+            const parseData = (text) => {
+                const lines = text.split('\n');
+                const data = {};
+                let currentCat = '';
+                let count = 0;
+
+                const categoryRegex = /^##\s*(.+)/;
+                // Match "1. **Term**：" and capture the rest
+                const idiomLineRegex = /^\d+\.\s*\*\*(.+?)\*\*：\s*(.+)/;
+
+                // 模擬標籤資料 (因為原始文字沒有包含這些資訊，這裡透過雜湊模擬產生，以確保 Demo 效果)
+                const getDifficulty = (id) => {
+                    const levels = ['基礎', '進階', '挑戰'];
+                    return levels[id % 3];
+                };
+                
+                const getSentiment = (id) => {
+                    const sentiments = ['褒義', '貶義', '中性'];
+                    return sentiments[(id * 7) % 3]; // 稍微錯開規律
+                };
+
+                lines.forEach(line => {
+                    const catMatch = line.match(categoryRegex);
+                    if (catMatch) {
+                        currentCat = catMatch[1].trim();
+                        data[currentCat] = [];
+                        return;
+                    }
+
+                    const idiomMatch = line.match(idiomLineRegex);
+                    if (idiomMatch && currentCat) {
+                        const term = idiomMatch[1];
+                        const rest = idiomMatch[2];
+                        
+                        let definition = "尚無釋義";
+                        let sentence = rest;
+
+                        // Parse [釋義] and [例句]
+                        // Format: [釋義] definition text [例句] sentence text
+                        const defMarker = "[釋義]";
+                        const exMarker = "[例句]";
+                        
+                        const defStart = rest.indexOf(defMarker);
+                        const exStart = rest.indexOf(exMarker);
+
+                        if (defStart !== -1 && exStart !== -1) {
+                            // Both exist
+                            definition = rest.substring(defStart + defMarker.length, exStart).trim();
+                            sentence = rest.substring(exStart + exMarker.length).trim();
+                        } else if (defStart !== -1) {
+                            // Only definition
+                            definition = rest.substring(defStart + defMarker.length).trim();
+                            sentence = ""; // No sentence provided
+                        } else if (exStart !== -1) {
+                            // Only sentence marker found (unexpected but handle it)
+                            sentence = rest.substring(exStart + exMarker.length).trim();
+                        }
+                        // Else: raw text in 'sentence'
+
+                        data[currentCat].push({
+                            id: count,
+                            term: term,
+                            definition: definition,
+                            sentence: sentence,
+                            rawSentence: sentence.replace(/<[^>]+>/g, ''), 
+                            difficulty: getDifficulty(count), 
+                            sentiment: getSentiment(count),   
+                        });
+                        count++;
+                    }
+                });
+
+                setParsedData(data);
+                setCategories(Object.keys(data));
+            };
+
+            // Collect all items for favorites or cross-category queries
+            const allItems = useMemo(() => {
+                return Object.values(parsedData).flat();
+            }, [parsedData]);
+
+            const favoriteItems = useMemo(() => {
+                return allItems.filter(item => favorites.includes(item.id));
+            }, [allItems, favorites]);
+
+            // Calculate category start days
+            const categoryStartDays = useMemo(() => {
+                const offsets = {};
+                let currentDay = 1;
+                categories.forEach(cat => {
+                    offsets[cat] = currentDay;
+                    const itemCount = parsedData[cat]?.length || 0;
+                    const pageCount = Math.max(1, Math.ceil(itemCount / 10));
+                    currentDay += pageCount;
+                });
+                return offsets;
+            }, [categories, parsedData]);
+
+            // 初始加載時解析資料
+            useEffect(() => {
+                parseData(FULL_DATA_SOURCE);
+            }, []);
+
+            const handleStartLearn = (category) => {
+                setActiveCategory(category);
+                setLearnPage(0);
+                setCurrentMode('learn');
+            };
+
+            const handleStartQuiz = (category) => {
+                setActiveCategory(category);
+                setQuizPage(0);
+                setCombo(0);
+                generateDailyQuiz(category, 0); 
+                setCurrentMode('quiz');
+            };
+
+            // Single AI Generation
+            const handleGenerateAI = async (item) => {
+                if (aiData[item.id] && (aiData[item.id].image || aiData[item.id].loading)) return;
+
+                setAiData(prev => ({ ...prev, [item.id]: { loading: true, step: 'analyzing' } }));
+
+                try {
+                    const promptData = await generateImagePrompt(item.term, item.definition);
+                    if (!promptData) throw new Error("Failed to generate prompt");
+
+                    setAiData(prev => ({ 
+                        ...prev, 
+                        [item.id]: { 
+                            ...prev[item.id], 
+                            step: 'generating',
+                            desc: promptData.chineseDescription 
+                        } 
+                    }));
+
+                    const imageUrl = await generateImage(promptData.englishPrompt);
+
+                    setAiData(prev => ({ 
+                        ...prev, 
+                        [item.id]: { 
+                            loading: false, 
+                            image: imageUrl, 
+                            desc: promptData.chineseDescription 
+                        } 
+                    }));
+
+                } catch (error) {
+                    console.error(error);
+                    setAiData(prev => ({ 
+                        ...prev, 
+                        [item.id]: { loading: false, error: true } 
+                    }));
+                }
+            };
+
+            // Batch Generation Logic
+            const handleGenerateAllAI = async (currentItems) => {
+                if (isGeneratingAll) return;
+                
+                setIsGeneratingAll(true);
+                const itemsToGen = currentItems.filter(item => !aiData[item.id]);
+
+                // Set loading state for all targets
+                setAiData(prev => {
+                    const next = { ...prev };
+                    itemsToGen.forEach(item => {
+                        next[item.id] = { loading: true, step: 'analyzing' };
+                    });
+                    return next;
+                });
+
+                // Execute sequentially to be safer with rate limits, or parallel if quota allows.
+                // Using parallel for user experience in this demo context.
+                // A small delay loop is safer for stability.
+                for (const item of itemsToGen) {
+                     await handleGenerateAI(item);
+                }
+                
+                setIsGeneratingAll(false);
+            };
+
+            // 產生每日測驗題目 (10題)
+            const generateDailyQuiz = (category, pageIdx) => {
+                let sourceItems = [];
+                if (category === '收藏夾') {
+                    sourceItems = favoriteItems;
+                } else {
+                    sourceItems = parsedData[category] || [];
+                }
+                
+                if (sourceItems.length === 0) return;
+                
+                const itemsPerPage = 10;
+                const start = pageIdx * itemsPerPage;
+                const end = start + itemsPerPage;
+                // Handle favorites pagination gracefully even if less than 10
+                const pageItems = sourceItems.slice(start, end);
+                
+                if (pageItems.length === 0) return;
+
+                const newQuestions = pageItems.map(targetItem => {
+                    // Generate options
+                    let pool = sourceItems.filter(i => i.id !== targetItem.id);
+                    
+                    // If pool is too small (e.g., favorites), supplement from allItems
+                    if (pool.length < 3) {
+                         const rest = allItems.filter(i => i.id !== targetItem.id && !pool.includes(i));
+                         pool = [...pool, ...rest];
+                    }
+                    
+                    // Shuffle pool and pick 3 distractors
+                    const distractors = [];
+                    pool.sort(() => Math.random() - 0.5);
+                    for(let i=0; i<3 && i<pool.length; i++) {
+                        distractors.push(pool[i]);
+                    }
+                    
+                    // Combine correct answer and distractors, then shuffle
+                    const options = [...distractors, targetItem].sort(() => Math.random() - 0.5);
+                    
+                    return {
+                        id: targetItem.id,
+                        term: targetItem.term,
+                        definition: targetItem.definition, 
+                        sentence: targetItem.sentence,
+                        difficulty: targetItem.difficulty, 
+                        sentiment: targetItem.sentiment,   
+                        options: options,
+                        userAnswer: null, 
+                        isCorrect: null 
+                    };
+                });
+                
+                setQuizQuestions(newQuestions);
+                setQuizScore(0);
+            };
+
+            const triggerConfetti = () => {
+                if (typeof confetti === 'function') {
+                    confetti({
+                        particleCount: 100,
+                        spread: 70,
+                        origin: { y: 0.6 }
+                    });
+                }
+            };
+
+            const handleQuestionAnswer = (questionId, selectedOptionId) => {
+                setQuizQuestions(prev => prev.map(q => {
+                    if (q.id !== questionId) return q;
+                    if (q.userAnswer !== null) return q; 
+                    
+                    const isCorrect = selectedOptionId === q.id; 
+                    
+                    if (isCorrect) {
+                        setQuizScore(s => s + 1);
+                        setCombo(c => c + 1);
+                        triggerConfetti();
+                    } else {
+                        setCombo(0);
+                    }
+                    
+                    return {
+                        ...q,
+                        userAnswer: selectedOptionId,
+                        isCorrect: isCorrect
+                    };
+                }));
+            };
+
+            // 處理測驗頁面切換
+            const handleQuizPageChange = (newPage) => {
+                setQuizPage(newPage);
+                setCombo(0); // Reset combo on page change? Or keep it? Resetting feels safer for new set.
+                generateDailyQuiz(activeCategory, newPage);
+            };
+
+            const renderHighlightedSentence = (htmlString, hideTerm = false) => {
+                let content = htmlString;
+                
+                if (hideTerm) {
+                    content = content.replace(/<span[^>]*>(.*?)<\/span>/g, '______');
+                } else {
+                    content = content.replace(/style="color: red; font-weight: bold;"/g, 'class="text-red-600 font-bold mx-1"');
+                }
+
+                return <span dangerouslySetInnerHTML={{ __html: content }} />;
+            };
+
+            // --- Views ---
+
+            const SetupView = () => (
+                <div className="w-full max-w-4xl mx-auto p-6 bg-white rounded-xl shadow-lg">
+                    <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
+                        <IconSettings className="mr-2 h-6 w-6" /> 資料匯入設定
+                    </h2>
+                    <p className="text-gray-600 mb-4">
+                        如果您想要更新成語資料，請在下方貼上新的 Markdown 內容。
+                        <br/>格式：`1. **成語**：[釋義] ... [例句] ...`
+                    </p>
+                    <textarea
+                        className="w-full h-96 p-4 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        value={rawText}
+                        onChange={(e) => setRawText(e.target.value)}
+                        placeholder="貼上 Markdown 內容..."
+                    />
+                    <div className="mt-6 flex justify-end space-x-4">
+                        <button 
+                            onClick={() => setRawText(FULL_DATA_SOURCE)}
+                            className="px-6 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                            恢復預設資料
+                        </button>
+                        <button 
+                            onClick={() => {
+                                parseData(rawText);
+                                setCurrentMode('menu');
+                            }}
+                            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md transition-colors flex items-center"
+                        >
+                            <IconSave className="mr-2 h-5 w-5" /> 解析並儲存
+                        </button>
+                    </div>
+                </div>
+            );
+
+            const MenuView = () => (
+                <div className="w-full max-w-5xl mx-auto">
+                    <div className="flex justify-between items-center mb-8">
+                        <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight flex items-center gap-3">
+                            <span className="text-5xl">🎓</span>
+                            成語大師 
+                        </h1>
+                        <button 
+                            onClick={() => setCurrentMode('setup')}
+                            className="p-2 text-gray-500 hover:text-blue-600 transition-colors rounded-full hover:bg-gray-200"
+                            title="資料設定"
+                        >
+                            <IconSettings className="h-6 w-6" />
+                        </button>
+                    </div>
+
+                    {/* Favorites Card */}
+                    <div className="mb-8">
+                        <div className="bg-gradient-to-r from-pink-50 to-red-50 p-6 rounded-xl shadow-sm hover:shadow-md transition-all border border-pink-100 flex flex-col md:flex-row items-center justify-between">
+                            <div className="flex items-center mb-4 md:mb-0">
+                                <div className="bg-white p-3 rounded-full shadow-sm text-red-500 mr-4">
+                                    <IconHeart fill={true} className="w-8 h-8" />
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-gray-800">我的收藏夾</h3>
+                                    <p className="text-gray-600 text-sm mt-1">
+                                        已收藏 {favorites.length} 則成語
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex space-x-3 w-full md:w-auto">
+                                <button 
+                                    onClick={() => handleStartLearn('收藏夾')}
+                                    disabled={favorites.length === 0}
+                                    className={`flex-1 md:flex-none flex items-center justify-center px-6 py-2.5 rounded-lg font-medium transition-colors ${favorites.length === 0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-white text-pink-600 border border-pink-200 hover:bg-pink-50'}`}
+                                >
+                                    <IconBookOpen className="h-4 w-4 mr-2" /> 複習
+                                </button>
+                                <button 
+                                    onClick={() => handleStartQuiz('收藏夾')}
+                                    disabled={favorites.length === 0}
+                                    className={`flex-1 md:flex-none flex items-center justify-center px-6 py-2.5 rounded-lg font-medium transition-colors ${favorites.length === 0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-pink-500 text-white hover:bg-pink-600 shadow-md'}`}
+                                >
+                                    <IconPlay className="h-4 w-4 mr-2" /> 挑戰
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {categories.length === 0 ? (
+                        <div className="text-center py-20 bg-white rounded-xl shadow-sm">
+                            <p className="text-gray-500 text-xl">資料載入中...</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {categories.map((cat, index) => (
+                                <div key={cat} className="bg-white p-6 rounded-xl shadow-sm hover:shadow-xl transition-all duration-300 border border-gray-100 transform hover:-translate-y-1 flex flex-col">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h3 className="text-lg font-bold text-gray-800">{cat}</h3>
+                                        <span className="text-xs font-mono text-gray-400">#{index + 1}</span>
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="flex items-center text-sm text-gray-500 mb-6 bg-gray-50 w-fit px-3 py-1 rounded-full">
+                                            {parsedData[cat].length} 則成語
+                                        </div>
+                                    </div>
+                                    <div className="flex space-x-3 mt-auto">
+                                        <button 
+                                            onClick={() => handleStartLearn(cat)}
+                                            className="flex-1 flex items-center justify-center py-2.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 font-medium transition-colors"
+                                        >
+                                            <IconBookOpen className="h-4 w-4 mr-2" /> 每日練習
+                                        </button>
+                                        <button 
+                                            onClick={() => handleStartQuiz(cat)}
+                                            className="flex-1 flex items-center justify-center py-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 font-medium transition-colors"
+                                        >
+                                            <IconPlay className="h-4 w-4 mr-2" /> 測驗挑戰
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+
+            const LearnView = () => {
+                const items = activeCategory === '收藏夾' ? favoriteItems : parsedData[activeCategory];
+                const itemsPerPage = 10;
+                const totalPages = Math.max(1, Math.ceil(items.length / itemsPerPage));
+                
+                const currentPage = Math.min(learnPage, totalPages - 1);
+                const currentItems = items.slice(currentPage * itemsPerPage, (currentPage + 1) * itemsPerPage);
+
+                const getDifficultyColor = (diff) => {
+                    switch(diff) {
+                        case '基礎': return 'bg-green-100 text-green-800';
+                        case '進階': return 'bg-blue-100 text-blue-800';
+                        case '挑戰': return 'bg-purple-100 text-purple-800';
+                        default: return 'bg-gray-100 text-gray-800';
+                    }
+                };
+
+                const getSentimentColor = (sent) => {
+                    switch(sent) {
+                        case '褒義': return 'bg-orange-100 text-orange-800';
+                        case '貶義': return 'bg-slate-200 text-slate-600';
+                        case '中性': return 'bg-gray-100 text-gray-600';
+                        default: return 'bg-gray-100 text-gray-800';
+                    }
+                };
+
+                // Calculate display day
+                const startDayOffset = (activeCategory === '收藏夾') ? 1 : (categoryStartDays[activeCategory] || 1);
+
+                return (
+                    <div className="w-full max-w-4xl mx-auto h-full flex flex-col py-4">
+                        {/* Header & Controls */}
+                        <div className="bg-white p-4 rounded-xl shadow-sm mb-6">
+                            <div className="flex flex-col md:flex-row items-center justify-between mb-4">
+                                <div className="flex items-center w-full md:w-auto">
+                                    <button onClick={() => setCurrentMode('menu')} className="flex items-center text-gray-500 hover:text-gray-900 transition-colors px-3 py-1 rounded-lg hover:bg-gray-100 mr-4">
+                                        <IconMenu className="h-5 w-5 mr-1"/> 返回選單
+                                    </button>
+                                    <h2 className="text-xl font-bold text-gray-800 flex items-center">
+                                        {activeCategory === '收藏夾' && <IconHeart fill={true} className="text-red-500 w-5 h-5 mr-2" />}
+                                        {activeCategory}
+                                    </h2>
+                                </div>
+
+                                {/* Global AI Generate Button */}
+                                <button 
+                                    onClick={() => handleGenerateAllAI(currentItems)}
+                                    disabled={isGeneratingAll}
+                                    className={`mt-3 md:mt-0 flex items-center px-4 py-2 rounded-lg font-bold text-white shadow-md transition-all ${isGeneratingAll ? 'bg-gray-400 cursor-wait' : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 hover:shadow-lg transform hover:-translate-y-0.5'}`}
+                                >
+                                    {isGeneratingAll ? (
+                                        <><div className="loader w-4 h-4 border-2 mr-2"></div> AI 圖解生成中...</>
+                                    ) : (
+                                        <><IconWand className="w-4 h-4 mr-2" /> 一鍵生成本頁圖解</>
+                                    )}
+                                </button>
+                            </div>
+                            
+                            {/* Pagination Tabs */}
+                            <div className="flex bg-gray-100 p-1 rounded-lg overflow-x-auto">
+                                {Array.from({ length: totalPages }).map((_, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => setLearnPage(idx)}
+                                        className={`flex-1 min-w-[100px] px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 whitespace-nowrap ${
+                                            currentPage === idx 
+                                            ? 'bg-white text-blue-600 shadow-sm' 
+                                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+                                        }`}
+                                    >
+                                        <span className="flex items-center justify-center">
+                                            <IconCalendar className="w-4 h-4 mr-2" /> 
+                                            {activeCategory === '收藏夾' ? `第 ${idx + 1} 頁` : `第 ${startDayOffset + idx} 天`}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex-1 space-y-6">
+                            {currentItems.map((item) => (
+                                <div key={item.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 relative group">
+                                    <button 
+                                        onClick={() => toggleFavorite(item.id)}
+                                        className={`absolute top-4 right-4 p-2 rounded-full transition-colors z-10 ${favorites.includes(item.id) ? 'text-red-500 bg-red-50' : 'text-gray-300 hover:text-red-400 hover:bg-gray-50'}`}
+                                        title={favorites.includes(item.id) ? "取消收藏" : "加入收藏"}
+                                    >
+                                        <IconHeart fill={favorites.includes(item.id)} className="w-6 h-6" />
+                                    </button>
+
+                                    <div className="flex flex-col md:flex-row gap-6">
+                                        {/* Content Section */}
+                                        <div className="flex-1">
+                                            <div className="flex flex-wrap items-start justify-between mb-3 pr-12">
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <h3 className="text-3xl font-bold text-gray-800 tracking-wider">{item.term}</h3>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${getDifficultyColor(item.difficulty)}`}>{item.difficulty}</span>
+                                                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${getSentimentColor(item.sentiment)}`}>{item.sentiment}</span>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* Definition */}
+                                            <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                                                <div className="flex items-center text-blue-800 font-bold text-sm mb-1">
+                                                    <IconBookOpen className="w-4 h-4 mr-1" /> 注釋
+                                                </div>
+                                                <p className="text-gray-700 text-lg">{item.definition}</p>
+                                            </div>
+                                            
+                                            {/* Sentence */}
+                                            <div className="text-gray-600 text-lg leading-relaxed pl-4 border-l-4 border-amber-100">
+                                                {renderHighlightedSentence(item.sentence)}
+                                            </div>
+                                        </div>
+
+                                        {/* AI Image Section (Side by Side on Desktop, Bottom on Mobile) */}
+                                        {aiData[item.id] && !aiData[item.id].error && (
+                                            <div className="w-full md:w-auto flex-shrink-0 flex flex-col items-center justify-center">
+                                                {aiData[item.id].loading ? (
+                                                    <div className="w-40 h-40 bg-gray-50 rounded-lg border border-gray-200 flex flex-col items-center justify-center text-gray-400">
+                                                        <div className="loader mb-2"></div>
+                                                        <span className="text-xs">繪製中...</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-100 animate-fade-in-up max-w-[320px] md:max-w-[240px]">
+                                                        <div className="mb-2 rounded-lg overflow-hidden border border-indigo-100 shadow-sm bg-white">
+                                                            <img 
+                                                                src={aiData[item.id].image} 
+                                                                alt="AI illustration" 
+                                                                className="w-full h-40 object-contain bg-white" 
+                                                            />
+                                                        </div>
+                                                        <h4 className="text-lg font-bold text-indigo-900 mb-1 flex items-center">
+                                                            <IconWand className="w-4 h-4 mr-1" />
+                                                            AI 情境解說
+                                                        </h4>
+                                                        <p className="text-base text-indigo-800 leading-relaxed">
+                                                            {aiData[item.id].desc}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="mt-8 flex justify-between items-center px-4">
+                            <button 
+                                onClick={() => setLearnPage(prev => Math.max(0, prev - 1))}
+                                disabled={currentPage === 0}
+                                className={`flex items-center px-4 py-2 rounded-lg font-medium transition-colors ${currentPage === 0 ? 'text-gray-300 cursor-not-allowed' : 'text-blue-600 hover:bg-blue-50'}`}
+                            >
+                                <IconChevronLeft className="h-5 w-5 mr-1" /> 上一頁
+                            </button>
+                            
+                            <span className="text-sm text-gray-400">
+                                顯示 {currentPage * itemsPerPage + 1} - {Math.min((currentPage + 1) * itemsPerPage, items.length)} 筆，共 {items.length} 筆
+                            </span>
+
+                            <button 
+                                onClick={() => setLearnPage(prev => Math.min(totalPages - 1, prev + 1))}
+                                disabled={currentPage === totalPages - 1}
+                                className={`flex items-center px-4 py-2 rounded-lg font-medium transition-colors ${currentPage === totalPages - 1 ? 'text-gray-300 cursor-not-allowed' : 'text-blue-600 hover:bg-blue-50'}`}
+                            >
+                                下一頁 <IconChevronRight className="h-5 w-5 ml-1" />
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            // ... QuizView and rest of the component ...
+            const QuizView = () => {
+                // (QuizView logic remains the same as previous correct version)
+                 if (quizQuestions.length === 0) return <div className="text-center p-10 text-gray-500">目前沒有測驗題目</div>;
+
+                const items = activeCategory === '收藏夾' ? favoriteItems : parsedData[activeCategory];
+                const itemsPerPage = 10;
+                const totalPages = Math.max(1, Math.ceil(items.length / itemsPerPage));
+                const currentPage = Math.min(quizPage, totalPages - 1);
+                
+                // Calculate display day
+                const startDayOffset = (activeCategory === '收藏夾') ? 1 : (categoryStartDays[activeCategory] || 1);
+
+                // Dynamic styles based on combo
+                let comboColor = "text-gray-400";
+                let comboBorder = "border-gray-200";
+                if (combo > 2) { comboColor = "text-blue-500"; comboBorder = "border-blue-200"; }
+                if (combo > 5) { comboColor = "text-yellow-500"; comboBorder = "border-yellow-200"; }
+                if (combo > 8) { comboColor = "text-red-500"; comboBorder = "border-red-200"; }
+
+                return (
+                    <div className="w-full max-w-3xl mx-auto flex flex-col h-full py-4">
+                        {/* Quiz Navigation Bar */}
+                        <div className={`flex flex-col md:flex-row items-center justify-between mb-6 bg-white p-4 rounded-xl shadow-sm sticky top-0 z-10 transition-colors duration-300 border-b-4 ${combo > 5 ? 'border-yellow-400' : 'border-transparent'}`}>
+                            <div className="flex items-center w-full md:w-auto mb-4 md:mb-0">
+                                <button onClick={() => setCurrentMode('menu')} className="flex items-center text-gray-500 hover:text-gray-900 transition-colors px-3 py-1 rounded-lg hover:bg-gray-100 mr-4">
+                                    <IconMenu className="mr-1 h-4 w-4"/> 結束
+                                </button>
+                                <div className="flex items-center space-x-4">
+                                    <span className="text-green-600 font-bold flex items-center"><IconCheckCircle className="h-4 w-4 mr-1"/> {quizScore}</span>
+                                    
+                                    {/* Combo Counter */}
+                                    <div className={`flex items-center font-bold transition-all duration-300 ${comboColor} ${combo > 0 ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}>
+                                        <IconFlame className={`w-5 h-5 mr-1 ${combo > 5 ? 'animate-pulse' : ''}`} />
+                                        <span className={combo > 0 ? 'animate-pop' : ''}>Combo x{combo}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex bg-gray-100 p-1 rounded-lg w-full md:w-auto overflow-x-auto">
+                                {Array.from({ length: totalPages }).map((_, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => handleQuizPageChange(idx)}
+                                        className={`flex-1 md:flex-none px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 whitespace-nowrap ${
+                                            currentPage === idx 
+                                            ? 'bg-white text-blue-600 shadow-sm' 
+                                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+                                        }`}
+                                    >
+                                        <span className="flex items-center justify-center">
+                                            <IconCalendar className="w-4 h-4 mr-2" /> 
+                                            {activeCategory === '收藏夾' ? `第 ${idx + 1} 頁` : `第 ${startDayOffset + idx} 天`}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Questions List */}
+                        <div className="space-y-6 pb-10">
+                            {quizQuestions.map((q, index) => (
+                                <div key={q.id} className={`bg-white rounded-xl shadow-sm border-2 overflow-hidden transition-all duration-300 ${q.userAnswer !== null ? (q.isCorrect ? 'border-green-100' : 'border-red-100') : 'border-transparent'}`}>
+                                    <div className="p-6 border-b border-gray-50 bg-gray-50/50 relative">
+                                        {/* Favorite Toggle in Quiz */}
+                                        <button 
+                                            onClick={() => toggleFavorite(q.id)}
+                                            className={`absolute top-4 right-4 p-2 rounded-full transition-colors ${favorites.includes(q.id) ? 'text-red-500 bg-white shadow-sm' : 'text-gray-300 hover:text-red-400'}`}
+                                        >
+                                            <IconHeart fill={favorites.includes(q.id)} className="w-5 h-5" />
+                                        </button>
+
+                                        <div className="flex items-center justify-between mb-4 pr-10">
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest bg-gray-200 px-2 py-1 rounded">Question {index + 1}</span>
+                                            {q.userAnswer !== null && (
+                                                <span className={`text-sm font-bold px-3 py-1 rounded-full flex items-center ${q.isCorrect ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} ${q.isCorrect ? 'animate-pop' : 'animate-shake'}`}>
+                                                    {q.isCorrect ? '正確' : '錯誤'}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-xl md:text-2xl text-gray-800 leading-relaxed font-serif">
+                                            {renderHighlightedSentence(q.sentence, true)}
+                                        </div>
+                                    </div>
+
+                                    <div className="p-6 bg-white">
+                                        {q.userAnswer !== null && !q.isCorrect && (
+                                            <div className="mb-6 bg-red-50 border border-red-100 rounded-xl p-5 animate-fade-in">
+                                                <div className="flex items-center mb-3 text-red-700 font-bold">
+                                                    <IconInfo className="w-5 h-5 mr-2" />
+                                                    詳細解析
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <p className="text-gray-700"><span className="font-bold">正確成語：</span><span className="text-xl font-black text-gray-900 tracking-wide">{q.term}</span></p>
+                                                    {/* Added Definition in Analysis */}
+                                                    <div className="text-gray-600 text-sm leading-relaxed">
+                                                        <span className="font-bold text-gray-500">釋義：</span>{q.definition}
+                                                    </div>
+                                                    <div className="text-gray-600 text-sm leading-relaxed bg-white p-3 rounded-lg border border-red-100 mt-2">
+                                                        <span className="font-bold block mb-1 text-gray-500">完整例句：</span>
+                                                        {renderHighlightedSentence(q.sentence, false)} 
+                                                    </div>
+                                                    
+                                                    {/* Quiz Result AI Image */}
+                                                    {aiData[q.id] && !aiData[q.id].loading && !aiData[q.id].error && (
+                                                        <div className="mt-3 bg-indigo-50 rounded-lg p-3 border border-indigo-100 flex items-start">
+                                                             <div className="flex-shrink-0 w-16 h-16 mr-3 rounded-md overflow-hidden border border-indigo-200 bg-white">
+                                                                <img src={aiData[q.id].image} className="w-full h-full object-cover" />
+                                                             </div>
+                                                             <div>
+                                                                 <div className="text-xs font-bold text-indigo-800 mb-1">AI 圖解</div>
+                                                                 <div className="text-xs text-indigo-700">{aiData[q.id].desc}</div>
+                                                             </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            {q.options.map((option) => {
+                                                let btnClass = "p-3 rounded-lg border text-base font-medium transition-all duration-200 text-left flex items-center relative";
+                                                
+                                                if (q.userAnswer !== null) {
+                                                    // 作答後的樣式
+                                                    if (option.id === q.id) {
+                                                        btnClass += " bg-green-50 border-green-500 text-green-700 ring-1 ring-green-500"; // 正確選項
+                                                    } else if (option.id === q.userAnswer && !q.isCorrect) {
+                                                        btnClass += " bg-red-50 border-red-500 text-red-700 ring-1 ring-red-500"; // 選錯的項目
+                                                    } else {
+                                                        btnClass += " bg-gray-50 border-gray-100 text-gray-400 opacity-60"; // 其他未選項目
+                                                    }
+                                                } else {
+                                                    // 未作答樣式
+                                                    btnClass += " bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:shadow-sm cursor-pointer active:scale-[0.99]";
+                                                }
+
+                                                return (
+                                                    <button 
+                                                        key={option.id}
+                                                        onClick={() => handleQuestionAnswer(q.id, option.id)}
+                                                        disabled={q.userAnswer !== null}
+                                                        className={btnClass}
+                                                    >
+                                                        {option.term}
+                                                        {q.userAnswer !== null && option.id === q.id && <IconCheckCircle className="ml-auto h-5 w-5 text-green-600" />}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-100 text-gray-900 p-4 md:p-8 flex flex-col">
+                    {currentMode === 'menu' && <MenuView />}
+                    {currentMode === 'setup' && <SetupView />}
+                    {currentMode === 'learn' && <LearnView />}
+                    {currentMode === 'quiz' && <QuizView />}
+                    <style jsx global>{`
+                        @keyframes fadeIn {
+                            from { opacity: 0; transform: translateY(-10px); }
+                            to { opacity: 1; transform: translateY(0); }
+                        }
+                        .animate-fade-in {
+                            animation: fadeIn 0.3s ease-out forwards;
+                        }
+                    `}</style>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
