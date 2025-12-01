@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>互動式成語大師 (最終修正版)</title>
+    <title>互動式成語大師 (最終穩定版)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -44,7 +44,7 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
         const ITEMS_PER_PAGE = 15;
-        const apiKey = "AIzaSyC_PNQoI-NA8lRyVTm649xLRaetwRRvcSU"; // 請在此填入您的 API Key
+        const apiKey = ""; // 請在此填入您的 API Key
 
         // --- Sound Effect Helper ---
         const playSoundEffect = (type) => {
@@ -77,7 +77,10 @@
         const fetchWithRetry = async (url, options, retries = 3, backoff = 1000) => {
             try {
                 const response = await fetch(url, options);
-                if (!response.ok && retries > 0) throw new Error(`HTTP error! status: ${response.status}`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+                }
                 return response;
             } catch (error) {
                 if (retries === 0) throw error;
@@ -109,7 +112,12 @@
                     }
                 );
                 const data = await response.json();
-                return JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text);
+                let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!text) return null;
+                
+                // Clean Markdown
+                text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+                return JSON.parse(text);
             } catch (e) { console.error("Prompt gen failed", e); return null; }
         };
 
@@ -124,8 +132,15 @@
                     }
                 );
                 const data = await response.json();
-                return data.predictions?.[0] ? `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}` : null;
-            } catch (e) { console.error("Image gen failed", e); return null; }
+                // Check for valid prediction
+                if (data.predictions && data.predictions[0] && data.predictions[0].bytesBase64Encoded) {
+                    return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+                }
+                throw new Error("No image data returned");
+            } catch (e) { 
+                console.error("Image gen failed", e); 
+                return null; 
+            }
         };
 
         // Icons
@@ -141,7 +156,8 @@
             trash: <><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>,
             wand: <><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8 19 13"/><path d="M15 9h0"/><path d="M17.8 6.2 19 5"/><path d="m3 21 9-9"/><path d="M12.2 6.2 11 5"/></>,
             login: <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>,
-            lightning: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            lightning: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>,
+            refresh: <path d="M23 4v6h-6M1 20v-6h6" />
         };
 
         const Icon = ({ path, className, fill = "none" }) => (
@@ -400,6 +416,16 @@
                                         <div className="text-gray-600 leading-relaxed border-l-4 border-amber-200 pl-3">{item.sentence && item.sentence.split(item.term).map((part, i, arr) => (<React.Fragment key={i}>{part}{i < arr.length - 1 && <span className="text-red-600 font-bold mx-1">{item.term}</span>}</React.Fragment>))}</div>
                                     </div>
                                     {aiData[item.id] && !aiData[item.id].error && (<div className="w-full md:w-64 flex-shrink-0 flex flex-col items-center justify-center animate-fade-in-up">{aiData[item.id].loading ? (<div className="w-full h-40 bg-gray-50 rounded-lg border border-gray-200 flex flex-col items-center justify-center text-gray-400"><div className="loader mb-2"></div><span className="text-xs">AI 繪圖中...</span></div>) : (<div className="bg-indigo-50 rounded-xl p-3 border border-indigo-100 w-full"><div className="mb-2 rounded-lg overflow-hidden border border-indigo-200 bg-white shadow-sm"><img src={aiData[item.id].image} alt="AI illustration" className="w-full h-40 object-cover hover:scale-105 transition-transform duration-500" /></div><div className="text-xs text-indigo-800 font-medium leading-relaxed bg-white/50 p-2 rounded"><span className="font-bold block mb-1 text-indigo-600">💡 AI 情境解說</span>{aiData[item.id].desc}</div></div>)}</div>)}
+                                    {/* Error state */}
+                                    {aiData[item.id] && aiData[item.id].error && (
+                                        <div className="w-full md:w-64 flex-shrink-0 flex flex-col items-center justify-center animate-fade-in-up">
+                                            <div className="w-full h-40 bg-red-50 rounded-lg border border-red-200 flex flex-col items-center justify-center text-red-400 p-2 text-center">
+                                                <Icon path={icons.alert} className="w-6 h-6 mb-1"/>
+                                                <span className="text-xs font-bold">圖片生成失敗</span>
+                                                <button onClick={() => onGenerateAll([item])} className="mt-2 text-xs bg-white border border-red-200 px-2 py-1 rounded shadow-sm hover:bg-red-50">重試</button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -540,7 +566,7 @@
                     {mistakes.length === 0 ? <div className="text-center py-20 bg-white rounded-xl shadow-sm"><div className="text-6xl mb-4">🎉</div><p className="text-xl text-gray-600 font-bold">太棒了！目前沒有錯題</p><p className="text-gray-400 mt-2">繼續保持，去挑戰更多成語吧！</p></div> : (
                         <div className="grid gap-4">{mistakes.map(item => { const log = mistakeLog.find(m => m.id === item.id); return (<div key={item.id} className="bg-white p-5 rounded-xl shadow-sm border-l-4 border-red-400 flex justify-between items-center"><div><h3 className="text-xl font-bold text-gray-800 mb-1">{item.term} <span className="text-xs text-red-500 bg-red-50 px-2 rounded">錯誤 {log.count} 次</span></h3><p className="text-gray-500 text-sm">{item.definition}</p></div><div className="text-xs text-gray-400 text-right">最後錯誤:<br/>{new Date(log.lastMissed).toLocaleDateString()}</div></div>); })}</div>
                     )}
-                    {mistakes.length > 0 && <div className="text-center mt-8"><button onClick={() => {if(confirm('確定清空錯題本？')) setMistakeLog([])}} className="text-gray-400 hover:text-gray-600 text-sm">清空錯題本</button></div>}
+                    {mistakes.length > 0 && <div className="text-center mt-8"><button onClick={() => {if(confirm('確定清空錯題本？')) { setMistakeLog([]); localStorage.setItem('idiomMistakes', '[]'); } }} className="text-gray-400 hover:text-gray-600 text-sm">清空錯題本</button></div>}
                 </div>
             );
         };
@@ -582,13 +608,14 @@
                     setIsLocked(true);
                     setShowNameWarning(false);
                     localStorage.setItem('idiomLastUser', userName);
-                    setLastUser(userName);
+                    setLastUser(userName); // Force Update
                 }
             };
 
             const handleQuickLogin = () => {
-                if (lastUser) {
-                    setUserName(lastUser);
+                const storedUser = localStorage.getItem('idiomLastUser');
+                if (storedUser) {
+                    setUserName(storedUser);
                     setIsLocked(true);
                     setShowNameWarning(false);
                 }
@@ -689,11 +716,11 @@
                 else { 
                     setCombo(0); 
                     playSoundEffect('wrong'); 
-                    // Direct update to state AND localStorage to ensure persistence
+                    // FORCE UPDATE & SAVE
                     setMistakeLog(prev => { 
                         const existing = prev.find(m => m.id === q.id); 
                         const newLog = existing ? prev.map(m => m.id === q.id ? { ...m, count: m.count + 1, lastMissed: new Date().toISOString() } : m) : [...prev, { id: q.id, count: 1, lastMissed: new Date().toISOString() }]; 
-                        localStorage.setItem('idiomMistakes', JSON.stringify(newLog)); // Force save immediately
+                        localStorage.setItem('idiomMistakes', JSON.stringify(newLog)); // Force save
                         return newLog;
                     }); 
                 }
@@ -702,8 +729,23 @@
 
             const finishQuiz = () => {
                 const record = { id: Date.now(), date: new Date().toLocaleString(), userName, score: quizScore, total: quizQuestions.length, category: activeCategory, details: quizQuestions.map(q => ({ term: q.term, definition: q.definition, sentence: q.sentence, isCorrect: q.isCorrect, userAnswer: q.options.find(o => o.id === q.userAnswer)?.term || "未作答", correctAnswer: q.term })) };
-                setHistoryLog(prev => [record, ...prev]);
-                if (activeCategory !== '收藏夾' && activeCategory !== '錯題本') { const key = `${activeCategory}-${quizPage}`; if (!completedDays.includes(key)) { setCompletedDays(prev => [...prev, key]); } }
+                
+                setHistoryLog(prev => {
+                    const newLog = [record, ...prev];
+                    localStorage.setItem('idiomHistory', JSON.stringify(newLog));
+                    return newLog;
+                });
+
+                if (activeCategory !== '收藏夾' && activeCategory !== '錯題本') { 
+                    const key = `${activeCategory}-${quizPage}`; 
+                    if (!completedDays.includes(key)) { 
+                        setCompletedDays(prev => {
+                            const newDays = [...prev, key];
+                            localStorage.setItem('idiomCompletedDays', JSON.stringify(newDays));
+                            return newDays;
+                        }); 
+                    } 
+                }
             };
 
             return (
