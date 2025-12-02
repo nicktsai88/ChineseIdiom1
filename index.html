@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>互動式成語大師 (Debug版)</title>
+    <title>互動式成語大師 (GitHub強力除錯版)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -78,13 +78,23 @@
             } catch (e) { console.error("Audio play failed", e); }
         };
 
-        // --- API Helpers ---
+        // --- API Helpers (Enhanced Error Handling) ---
         const fetchWithRetry = async (url, options, retries = 3, backoff = 1000) => {
             try {
                 const response = await fetch(url, options);
                 if (!response.ok) {
                     const errorText = await response.text();
-                    const err = new Error(`HTTP error! status: ${response.status}`);
+                    let errorMsg = `HTTP error! status: ${response.status}`;
+                    try {
+                        const errorJson = JSON.parse(errorText);
+                        if (errorJson.error && errorJson.error.message) {
+                            errorMsg += ` - ${errorJson.error.message}`;
+                        }
+                    } catch (e) {
+                        errorMsg += ` - ${errorText.substring(0, 100)}`; // Fallback to raw text if not JSON
+                    }
+                    
+                    const err = new Error(errorMsg);
                     err.status = response.status;
                     err.body = errorText;
                     throw err;
@@ -127,7 +137,7 @@
                 return JSON.parse(text);
             } catch (e) { 
                 console.error("Prompt gen failed", e); 
-                return null; 
+                return { error: true, errorMessage: e.message };
             }
         };
 
@@ -149,7 +159,7 @@
                 return null;
             } catch (e) { 
                 console.error("Image gen failed", e);
-                throw e; // Throw to let outer catch handle it
+                throw e; // Re-throw to capture in handler
             }
         };
 
@@ -432,9 +442,7 @@
                                             <div className="w-full h-40 bg-red-50 rounded-lg border border-red-200 flex flex-col items-center justify-center text-red-400 p-2 text-center">
                                                 <Icon path={icons.alert} className="w-6 h-6 mb-1"/>
                                                 <span className="text-xs font-bold">圖片生成失敗</span>
-                                                {aiData[item.id].errorMessage && (
-                                                     <div className="text-[10px] mt-1 text-red-400 px-1 leading-tight max-h-16 overflow-y-auto">{aiData[item.id].errorMessage}</div>
-                                                )}
+                                                <div className="text-[10px] mt-1 text-red-400 px-1 leading-tight max-h-16 overflow-y-auto">{aiData[item.id].errorMessage}</div>
                                                 <button onClick={() => onGenerateAll([item])} className="mt-2 text-xs bg-white border border-red-200 px-2 py-1 rounded shadow-sm hover:bg-red-50">重試</button>
                                             </div>
                                             {/* 如果有成功抓到描述文字，即使圖片失敗也顯示 */}
