@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>互動式成語大師 (完整功能版)</title>
+    <title>互動式成語大師 (靜態圖解版)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -173,47 +173,23 @@
                 if (type === 'correct') {
                     // 新版答對音效：清脆悅耳的「叮咚」雙音 (C5 -> E5)
                     const now = ctx.currentTime;
-                    
-                    // 第一聲 (Do)
-                    const osc1 = ctx.createOscillator();
-                    const gain1 = ctx.createGain();
-                    osc1.type = 'sine';
-                    osc1.frequency.setValueAtTime(523.25, now); // C5
-                    gain1.gain.setValueAtTime(0.1, now);
-                    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-                    osc1.connect(gain1);
-                    gain1.connect(ctx.destination);
-                    osc1.start(now);
-                    osc1.stop(now + 0.5);
+                    const osc1 = ctx.createOscillator(); const gain1 = ctx.createGain();
+                    osc1.type = 'sine'; osc1.frequency.setValueAtTime(523.25, now);
+                    gain1.gain.setValueAtTime(0.1, now); gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+                    osc1.connect(gain1); gain1.connect(ctx.destination); osc1.start(now); osc1.stop(now + 0.5);
 
-                    // 第二聲 (Mi) - 稍微延遲
-                    const osc2 = ctx.createOscillator();
-                    const gain2 = ctx.createGain();
-                    osc2.type = 'sine';
-                    osc2.frequency.setValueAtTime(659.25, now + 0.1); // E5
-                    gain2.gain.setValueAtTime(0.1, now + 0.1);
-                    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
-                    osc2.connect(gain2);
-                    gain2.connect(ctx.destination);
-                    osc2.start(now + 0.1);
-                    osc2.stop(now + 0.6);
+                    const osc2 = ctx.createOscillator(); const gain2 = ctx.createGain();
+                    osc2.type = 'sine'; osc2.frequency.setValueAtTime(659.25, now + 0.1);
+                    gain2.gain.setValueAtTime(0.1, now + 0.1); gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+                    osc2.connect(gain2); gain2.connect(ctx.destination); osc2.start(now + 0.1); osc2.stop(now + 0.6);
 
                 } else {
                     // 新版答錯音效：短促低沉的「啵」一聲，比較不刺耳
                     const now = ctx.currentTime;
                     const osc = ctx.createOscillator(); const gain = ctx.createGain();
-                    
-                    osc.type = 'triangle'; // 三角波，聲音圓潤一點
-                    osc.frequency.setValueAtTime(150, now);
-                    osc.frequency.exponentialRampToValueAtTime(50, now + 0.2); // 快速滑音向下
-                    
-                    gain.gain.setValueAtTime(0.15, now);
-                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-                    
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start(now);
-                    osc.stop(now + 0.2);
+                    osc.type = 'triangle'; osc.frequency.setValueAtTime(150, now); osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
+                    gain.gain.setValueAtTime(0.15, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                    osc.connect(gain); gain.connect(ctx.destination); osc.start(now); osc.stop(now + 0.2);
                 }
             } catch (e) {
                 console.error("Audio play failed", e);
@@ -233,15 +209,14 @@
             trash: <><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>,
             login: <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>,
             lightning: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>,
-            image: <><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></>,
-            logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>,
-            userX: <><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></>
+            image: <><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></>
         };
 
         const Icon = ({ path, className, fill = "none" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{path}</svg>
         );
 
+        // Data & Sentiment
         const getSentiment = (term) => {
             const posKeywords = ['美', '善', '好', '正', '高', '傑出', '優秀', '勤', '忠', '孝', '賢', '德', '勇', '誠', '信', '敬', '愛', '助', '益', '興', '盛', '祥', '和', '金', '玉', '明', '清', '錦', '良', '妙', '神'];
             const negKeywords = ['惡', '壞', '貪', '枉', '罪', '亂', '假', '虛', '偽', '害', '損', '敗', '亡', '殺', '死', '暴', '虐', '凶', '殘', '奸', '邪', '短', '淺', '錯', '謬', '狼', '狽', '鼠', '蛇', '鬼'];
@@ -313,7 +288,7 @@
 49. **勤能補拙**：[釋義] 勤奮可彌補天資不足。 [例句] 雖然他不夠聰明，但深信勤能補拙，每天比別人花更多時間練習。
 50. **持盈保泰**：[釋義] 處富貴而不驕，保守平安。 [例句] 企業在全盛時期更應懂得持盈保泰，謹慎經營。
 51. **明哲保身**：[釋義] 迴避禍患，保全自己。 [例句] 在混亂的局勢中，許多人選擇明哲保身，不願捲入紛爭。
-52. **光風霽月**：[釋義] 形容人胸懷坦蕩。 [例句] 他的品格高尚，如光風霽月般令人景仰。
+52. **光風霽月**：[釋義] 形容人胸懷坦蕩。 [例句] 他品格高尚，如光風霽月般令人景仰。
 53. **遺世獨立**：[釋義] 清高脫俗，不與世俗往來。 [例句] 這位隱士住在深山中，過著遺世獨立的生活。
 54. **據理力爭**：[釋義] 依據道理，極力爭取。 [例句] 面對不合理的收費，消費者有權利據理力爭。
 55. **固執不通**：[釋義] 頑固堅持，不知變通。 [例句] 他的想法太過老舊且固執不通，很難與年輕人溝通。
@@ -394,7 +369,7 @@
         const MenuView = ({ 
             userName, setUserName, showNameWarning, mistakeLog, favorites, categories, parsedData, 
             onStartLearn, onStartQuiz, onViewHistory, onViewMistakes,
-            onLogin, isLocked, onQuickLogin, lastUser, onLogout, onDeleteUser
+            onLogin, isLocked, onQuickLogin, lastUser
         }) => (
             <div className="max-w-5xl mx-auto">
                 <div className="flex justify-between items-end mb-8">
@@ -418,15 +393,7 @@
                                         <Icon path={icons.login} className="w-4 h-4 mr-1" fill="currentColor"/> 登入
                                     </button>
                                 ) : (
-                                    <div className="flex gap-2">
-                                        <span className="text-green-600 text-sm font-bold flex items-center mr-2"><Icon path={icons.check} className="w-4 h-4 mr-1"/> 已登入</span>
-                                        <button onClick={onLogout} className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm flex items-center transition-colors shadow-sm">
-                                            <Icon path={icons.logout} className="w-4 h-4 mr-1" fill="currentColor"/> 登出
-                                        </button>
-                                        <button onClick={onDeleteUser} className="bg-gray-400 hover:bg-gray-500 text-white px-3 py-1 rounded text-sm flex items-center transition-colors shadow-sm" title="刪除使用者">
-                                            <Icon path={icons.userX} className="w-4 h-4 mr-1" fill="currentColor"/> 刪除
-                                        </button>
-                                    </div>
+                                    <span className="text-green-600 text-sm font-bold flex items-center"><Icon path={icons.check} className="w-4 h-4 mr-1"/> 已登入</span>
                                 )}
                                 {!isLocked && lastUser && (
                                     <button onClick={onQuickLogin} className="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1 rounded text-sm flex items-center transition-colors">
@@ -488,10 +455,11 @@
                             })}
                         </div>
                     </div>
+
                     <div className="space-y-4">
                         {currentItems.map(item => (
                             <div key={item.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 relative group hover:shadow-md transition-all">
-                                <button onClick={() => toggleFavorite(item.id)} className="absolute top-4 right-4 text-gray-300 hover:text-red-500 z-10"><Icon path={icons.heart} className="w-6 h-6" fill={favorites.includes(item.id) ? "currentColor" : "none"} /></button>
+                                <button onClick={() => toggleFavorite(item.id)} className={`absolute top-4 right-4 z-10 transition-colors ${favorites.includes(item.id) ? 'text-red-500' : 'text-gray-300 hover:text-red-500'}`}><Icon path={icons.heart} className="w-6 h-6" fill={favorites.includes(item.id) ? "currentColor" : "none"} /></button>
                                 <div className="flex flex-col md:flex-row gap-6">
                                     <div className="flex-1">
                                         <div className="flex items-baseline gap-3 mb-2"><h3 className="text-2xl font-bold text-gray-800">{item.term}</h3><span className={`text-xs px-2 py-0.5 rounded ${item.sentiment === '褒義詞' ? 'bg-green-100 text-green-700' : item.sentiment === '貶義詞' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>{item.sentiment}</span></div>
@@ -531,7 +499,6 @@
 
         const QuizView = ({ 
             questions, score, userName, combo, onAnswer, onFinish, onMenu, onViewHistory, favorites, toggleFavorite,
-            // New props
             activeCategory, totalItems, quizPage, onPageChange, completedDays 
         }) => {
             const [showResult, setShowResult] = useState(false);
@@ -599,26 +566,22 @@
                                 </div>
                                 {q.userAnswer !== null && !q.isCorrect && (
                                     <div className="p-6 bg-red-50 border-t border-red-100 animate-fade-in-up">
+                                        <div className="flex gap-2 text-base text-red-800 mb-2 font-bold"><Icon path={icons.book} className="w-5 h-5"/> 正解解析：</div>
+                                        <div className="text-gray-800 text-xl leading-relaxed"><span className="font-bold text-2xl mr-2 text-red-900">{q.term}</span> {q.definition}</div>
                                         
-                                        {/* Show Image in Quiz Result if available - Enhanced Layout */}
-                                        <div className="mt-6 bg-indigo-50 rounded-xl p-6 border border-indigo-100 flex flex-col items-center">
-                                            <div className="w-full aspect-video rounded-lg overflow-hidden border border-indigo-200 bg-white shadow-sm mb-4">
+                                        {/* Added: Show Image in Quiz Result if available */}
+                                         <div className="mt-4 bg-indigo-50 rounded-lg p-3 border border-indigo-100 flex items-start">
+                                             <div className="flex-shrink-0 w-24 h-24 mr-3 rounded-md overflow-hidden border border-indigo-200 bg-white">
                                                 <img 
                                                     src={q.image} 
                                                     className="w-full h-full object-cover" 
-                                                    onError={(e) => {e.target.style.display='none'}} // Hide if missing
+                                                    onError={(e) => {e.target.style.display='none'}} // Hide if missing in quiz
                                                 />
-                                            </div>
-                                            <div className="text-center w-full">
-                                                <div className="text-base font-bold text-indigo-800 mb-2">💡 情境解說</div>
-                                                <div className="text-2xl font-bold text-indigo-700 leading-relaxed">{q.desc}</div>
-                                            </div>
-                                        </div>
-
-                                        <div className="mt-6 flex gap-2 text-xl text-red-800 mb-2 font-bold"><Icon path={icons.book} className="w-6 h-6"/> 正解解析：</div>
-                                        <div className="text-gray-800 text-3xl leading-relaxed font-bold"><span className="text-4xl mr-2 text-red-900">{q.term}</span> {q.definition}</div>
-                                        <div className="mt-4 text-gray-600 text-2xl leading-relaxed pl-6 border-l-4 border-red-300 italic">
-                                            例句：{q.sentence}
+                                             </div>
+                                             <div>
+                                                 <div className="text-xs font-bold text-indigo-800 mb-1">情境解說</div>
+                                                 <div className="text-sm text-indigo-700">{q.desc}</div>
+                                             </div>
                                         </div>
                                     </div>
                                 )}
@@ -702,6 +665,10 @@
             const [completedDays, setCompletedDays] = useState(() => JSON.parse(localStorage.getItem('idiomCompletedDays')) || []);
             const [learnPage, setLearnPage] = useState(0);
 
+            // AI State
+            const [aiData, setAiData] = useState({});
+            const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+
             const [quizQuestions, setQuizQuestions] = useState([]);
             const [quizScore, setQuizScore] = useState(0);
             const [combo, setCombo] = useState(0);
@@ -709,11 +676,7 @@
 
             useEffect(() => { localStorage.setItem('idiomFavorites', JSON.stringify(favorites)); }, [favorites]);
             useEffect(() => { localStorage.setItem('idiomHistory', JSON.stringify(historyLog)); }, [historyLog]);
-            useEffect(() => { 
-                if (mistakeLog.length > 0) {
-                    localStorage.setItem('idiomMistakes', JSON.stringify(mistakeLog)); 
-                }
-            }, [mistakeLog]);
+            useEffect(() => { localStorage.setItem('idiomMistakes', JSON.stringify(mistakeLog)); }, [mistakeLog]);
             useEffect(() => { localStorage.setItem('idiomCompletedDays', JSON.stringify(completedDays)); }, [completedDays]);
             
             // Login Handlers
@@ -735,34 +698,11 @@
                 }
             };
 
-            const handleLogout = () => {
-                setIsLocked(false);
-                setUserName('');
-            };
-
-            const handleDeleteUser = () => {
-                if (confirm('確定要刪除這位使用者的所有資料嗎？')) {
-                    if (confirm('這將會清除所有學習紀錄、收藏和錯題本，且無法復原！確定要執行嗎？')) {
-                        localStorage.removeItem('idiomLastUser');
-                        localStorage.removeItem('idiomFavorites');
-                        localStorage.removeItem('idiomHistory');
-                        localStorage.removeItem('idiomMistakes');
-                        localStorage.removeItem('idiomCompletedDays');
-                        
-                        setFavorites([]);
-                        setHistoryLog([]);
-                        setMistakeLog([]);
-                        setCompletedDays([]);
-                        setLastUser(null);
-                        handleLogout();
-                    }
-                }
-            };
-
             const toggleFavorite = (id) => { setFavorites(prev => prev.includes(id) ? prev.filter(fid => fid !== id) : [...prev, id]); };
             const allItems = useMemo(() => Object.values(parsedData).flat(), [parsedData]);
 
             const parseData = (text) => {
+                if (!text?.trim()) return;
                 const lines = text.split('\n');
                 const data = {};
                 let currentCat = '';
@@ -887,7 +827,6 @@
                             onViewHistory={() => setCurrentMode('history')}
                             onViewMistakes={() => setCurrentMode('mistakes')}
                             onLogin={handleLogin} isLocked={isLocked} onQuickLogin={handleQuickLogin} lastUser={lastUser}
-                            onLogout={handleLogout} onDeleteUser={handleDeleteUser}
                         />
                     )}
                     {currentMode === 'learn' && (
@@ -898,6 +837,7 @@
                             favorites={favorites} toggleFavorite={toggleFavorite}
                             completedDays={completedDays}
                             onMenu={() => setCurrentMode('menu')}
+                            // No AI props needed now
                         />
                     )}
                     {currentMode === 'quiz' && (
