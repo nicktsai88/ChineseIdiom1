@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>互動式成語大師 (GitHub版)</title>
+    <title>互動式成語大師 (Debug版)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -46,10 +46,7 @@
         const ITEMS_PER_PAGE = 15;
         
         // ---------------------------------------------------------
-        // ★★★ 請確認您的 API Key 權限設定 ★★★
-        // 如果在 GitHub 上無法顯示圖片，請至 Google Cloud Console
-        // 檢查 API Key 的「網站限制 (HTTP Referrers)」
-        // 必須包含: https://nicktsai88.github.io/*
+        // ★★★ 請在此處填入您的 Google Gemini API Key ★★★
         // ---------------------------------------------------------
         const apiKey = "AIzaSyC_PNQoI-NA8lRyVTm649xLRaetwRRvcSU"; 
         // ---------------------------------------------------------
@@ -152,10 +149,7 @@
                 return null;
             } catch (e) { 
                 console.error("Image gen failed", e);
-                if (e.status === 400 && e.body.includes("billed users")) {
-                    throw new Error("BILLING_REQUIRED");
-                }
-                return null; 
+                throw e; // Throw to let outer catch handle it
             }
         };
 
@@ -438,8 +432,18 @@
                                             <div className="w-full h-40 bg-red-50 rounded-lg border border-red-200 flex flex-col items-center justify-center text-red-400 p-2 text-center">
                                                 <Icon path={icons.alert} className="w-6 h-6 mb-1"/>
                                                 <span className="text-xs font-bold">圖片生成失敗</span>
+                                                {aiData[item.id].errorMessage && (
+                                                     <div className="text-[10px] mt-1 text-red-400 px-1 leading-tight max-h-16 overflow-y-auto">{aiData[item.id].errorMessage}</div>
+                                                )}
                                                 <button onClick={() => onGenerateAll([item])} className="mt-2 text-xs bg-white border border-red-200 px-2 py-1 rounded shadow-sm hover:bg-red-50">重試</button>
                                             </div>
+                                            {/* 如果有成功抓到描述文字，即使圖片失敗也顯示 */}
+                                            {aiData[item.id].desc && (
+                                                <div className="w-full mt-2 text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-200">
+                                                    <span className="font-bold text-gray-500 block mb-1">情境解說 (文字版):</span>
+                                                    {aiData[item.id].desc}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -677,7 +681,17 @@
                     setAiData(prev => ({ ...prev, [item.id]: { loading: false, image: imageUrl, desc: promptData.chineseDescription } }));
                 } catch (e) {
                     console.error(e);
-                    setAiData(prev => ({ ...prev, [item.id]: { loading: false, error: true } }));
+                    // Capture the specific error message
+                    let msg = e.message;
+                    if (e.body) {
+                        try {
+                            const errJson = JSON.parse(e.body);
+                            msg = errJson.error.message;
+                        } catch (jsonErr) {
+                            msg = e.body; // fallback to raw text
+                        }
+                    }
+                    setAiData(prev => ({ ...prev, [item.id]: { loading: false, error: true, errorMessage: msg } }));
                 }
             };
 
