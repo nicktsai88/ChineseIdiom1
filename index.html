@@ -173,48 +173,23 @@
                 if (type === 'correct') {
                     // 新版答對音效：清脆悅耳的「叮咚」雙音 (C5 -> E5)
                     const now = ctx.currentTime;
-                    
-                    // 第一聲 (Do)
-                    const osc1 = ctx.createOscillator();
-                    const gain1 = ctx.createGain();
-                    osc1.type = 'sine';
-                    osc1.frequency.setValueAtTime(523.25, now); // C5
-                    gain1.gain.setValueAtTime(0.1, now);
-                    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-                    osc1.connect(gain1);
-                    gain1.connect(ctx.destination);
-                    osc1.start(now);
-                    osc1.stop(now + 0.5);
+                    const osc1 = ctx.createOscillator(); const gain1 = ctx.createGain();
+                    osc1.type = 'sine'; osc1.frequency.setValueAtTime(523.25, now);
+                    gain1.gain.setValueAtTime(0.1, now); gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+                    osc1.connect(gain1); gain1.connect(ctx.destination); osc1.start(now); osc1.stop(now + 0.5);
 
-                    // 第二聲 (Mi) - 稍微延遲
-                    const osc2 = ctx.createOscillator();
-                    const gain2 = ctx.createGain();
-                    osc2.type = 'sine';
-                    osc2.frequency.setValueAtTime(659.25, now + 0.1); // E5
-                    gain2.gain.setValueAtTime(0.1, now + 0.1);
-                    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
-                    osc2.connect(gain2);
-                    gain2.connect(ctx.destination);
-                    osc2.start(now + 0.1);
-                    osc2.stop(now + 0.6);
+                    const osc2 = ctx.createOscillator(); const gain2 = ctx.createGain();
+                    osc2.type = 'sine'; osc2.frequency.setValueAtTime(659.25, now + 0.1);
+                    gain2.gain.setValueAtTime(0.1, now + 0.1); gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+                    osc2.connect(gain2); gain2.connect(ctx.destination); osc2.start(now + 0.1); osc2.stop(now + 0.6);
 
                 } else {
                     // 新版答錯音效：短促低沉的「啵」一聲，比較不刺耳
                     const now = ctx.currentTime;
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    
-                    osc.type = 'triangle'; // 三角波，聲音圓潤一點
-                    osc.frequency.setValueAtTime(150, now);
-                    osc.frequency.exponentialRampToValueAtTime(50, now + 0.2); // 快速滑音向下
-                    
-                    gain.gain.setValueAtTime(0.15, now);
-                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-                    
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start(now);
-                    osc.stop(now + 0.2);
+                    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+                    osc.type = 'triangle'; osc.frequency.setValueAtTime(150, now); osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
+                    gain.gain.setValueAtTime(0.15, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                    osc.connect(gain); gain.connect(ctx.destination); osc.start(now); osc.stop(now + 0.2);
                 }
             } catch (e) {
                 console.error("Audio play failed", e);
@@ -472,6 +447,7 @@
                                 {activeCategory}
                             </h2>
                         </div>
+                        
                         <div className="flex overflow-x-auto max-w-full pb-2 md:pb-0 gap-2 mt-4 md:mt-0">
                             {Array.from({ length: totalPages }).map((_, i) => {
                                 const isCompleted = completedDays.includes(`${activeCategory}-${i}`);
@@ -479,16 +455,19 @@
                             })}
                         </div>
                     </div>
+
                     <div className="space-y-4">
                         {currentItems.map(item => (
                             <div key={item.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 relative group hover:shadow-md transition-all">
-                                <button onClick={() => toggleFavorite(item.id)} className="absolute top-4 right-4 text-gray-300 hover:text-red-500 z-10"><Icon path={icons.heart} className="w-6 h-6" fill={favorites.includes(item.id) ? "currentColor" : "none"} /></button>
+                                <button onClick={() => toggleFavorite(item.id)} className={`absolute top-4 right-4 z-10 transition-colors ${favorites.includes(item.id) ? 'text-red-500' : 'text-gray-300 hover:text-red-500'}`}><Icon path={icons.heart} className="w-6 h-6" fill={favorites.includes(item.id) ? "currentColor" : "none"} /></button>
                                 <div className="flex flex-col md:flex-row gap-6">
                                     <div className="flex-1">
                                         <div className="flex items-baseline gap-3 mb-2"><h3 className="text-2xl font-bold text-gray-800">{item.term}</h3><span className={`text-xs px-2 py-0.5 rounded ${item.sentiment === '褒義詞' ? 'bg-green-100 text-green-700' : item.sentiment === '貶義詞' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>{item.sentiment}</span></div>
                                         <div className="bg-blue-50 p-3 rounded-lg text-blue-900 mb-3 text-sm">{item.definition}</div>
                                         <div className="text-gray-600 leading-relaxed border-l-4 border-amber-200 pl-3">{item.sentence && item.sentence.split(item.term).map((part, i, arr) => (<React.Fragment key={i}>{part}{i < arr.length - 1 && <span className="text-red-600 font-bold mx-1">{item.term}</span>}</React.Fragment>))}</div>
                                     </div>
+                                    
+                                    {/* Static Image Section */}
                                     <div className="w-full md:w-64 flex-shrink-0 flex flex-col items-center justify-center animate-fade-in-up">
                                         <div className="bg-indigo-50 rounded-xl p-3 border border-indigo-100 w-full">
                                             <div className="mb-2 rounded-lg overflow-hidden border border-indigo-200 bg-white shadow-sm h-40 relative group-img">
@@ -497,6 +476,7 @@
                                                     alt={`${item.term} illustration`} 
                                                     className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
                                                     onError={(e) => {
+                                                        // Fallback for missing images
                                                         e.target.onerror = null; 
                                                         e.target.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="160" viewBox="0 0 200 160"><rect width="200" height="160" fill="%23f3f4f6"/><text x="50%" y="50%" font-family="sans-serif" font-size="14" text-anchor="middle" fill="%239ca3af">圖片建置中...</text></svg>';
                                                     }}
@@ -528,7 +508,7 @@
             useEffect(() => { if (isFinished && !showResult) { onFinish(); setShowResult(true); } }, [isFinished]);
 
             if (showResult) {
-                return (
+                 return (
                     <div className="max-w-2xl mx-auto pt-10">
                         <div className="bg-white rounded-2xl shadow-xl overflow-hidden text-center">
                             <div className="bg-blue-600 p-8 text-white"><h2 className="text-3xl font-bold mb-2">測驗完成！</h2><p className="opacity-90">辛苦了，{userName}</p></div>
@@ -611,7 +591,7 @@
                 </div>
             );
         };
-        
+
         const HistoryView = ({ historyLog, setHistoryLog, onMenu }) => {
             const [selectedLog, setSelectedLog] = useState(null);
             const renderQuestionSentence = (sentence, term) => { if (!sentence) return <span className="text-gray-400 italic">（例句資料缺失）</span>; return sentence.split(term).map((part, i, arr) => (<span key={i}>{part}{i < arr.length - 1 && <span className="inline-block min-w-[3rem] border-b-2 border-gray-400 mx-1 align-bottom text-transparent select-none">____</span>}</span>)); };
@@ -727,99 +707,105 @@
                 const data = {};
                 let currentCat = '';
                 let count = 0;
+                
                 lines.forEach(line => {
                     const catMatch = line.match(/^##\s*(.+)/);
-                    if (catMatch) { currentCat = catMatch[1].trim(); data[currentCat] = []; return; }
+                    if (catMatch) {
+                        currentCat = catMatch[1].trim();
+                        data[currentCat] = [];
+                        return;
+                    }
                     const idiomMatch = line.match(/^\d+\.\s*\*\*(.+?)\*\*：\s*(.+)/);
                     if (idiomMatch && currentCat) {
                         const term = idiomMatch[1];
                         const rest = idiomMatch[2];
                         let definition = "尚無釋義", sentence = rest;
+                        
                         const defIdx = rest.indexOf("[釋義]");
                         const exIdx = rest.indexOf("[例句]");
-                        if (defIdx !== -1 && exIdx !== -1) { definition = rest.substring(defIdx + 4, exIdx).trim(); sentence = rest.substring(exIdx + 4).trim(); }
-                        data[currentCat].push({ id: count++, term, definition, sentence, sentiment: getSentiment(term) });
+                        
+                        if (defIdx !== -1 && exIdx !== -1) {
+                            definition = rest.substring(defIdx + 4, exIdx).trim();
+                            sentence = rest.substring(exIdx + 4).trim();
+                        }
+
+                        // Mapping logic
+                        const desc = IDIOM_DESCRIPTIONS[count + 1] || "暫無情境解說";
+                        const imgPath = `images/p${String(count + 1).padStart(3, '0')}.jpg`;
+
+                        data[currentCat].push({
+                            id: count++,
+                            term, definition, sentence,
+                            sentiment: getSentiment(term),
+                            desc: desc,
+                            image: imgPath
+                        });
                     }
                 });
-                setParsedData(data); setCategories(Object.keys(data));
+                setParsedData(data);
+                setCategories(Object.keys(data));
             };
 
             useEffect(() => { parseData(FULL_DATA_SOURCE); }, []);
 
-            // AI Handlers
-            const handleGenerateAI = async (item) => {
-                if (aiData[item.id] && (aiData[item.id].image || aiData[item.id].loading)) return;
-                setAiData(prev => ({ ...prev, [item.id]: { loading: true } }));
-                try {
-                    const promptData = await generateImagePrompt(item.term, item.definition);
-                    if (!promptData) throw new Error("No prompt");
-                    setAiData(prev => ({ ...prev, [item.id]: { ...prev[item.id], desc: promptData.chineseDescription } }));
-                    const imageUrl = await generateImage(promptData.englishPrompt);
-                    setAiData(prev => ({ ...prev, [item.id]: { loading: false, image: imageUrl, desc: promptData.chineseDescription } }));
-                } catch (e) {
-                    console.error(e);
-                    setAiData(prev => ({ ...prev, [item.id]: { loading: false, error: true } }));
-                }
-            };
-
-            const handleGenerateAllAI = async (currentItems) => {
-                if (isGeneratingAll) return;
-                setIsGeneratingAll(true);
-                const itemsToGen = currentItems.filter(item => !aiData[item.id] || aiData[item.id].error);
-                setAiData(prev => {
-                    const next = { ...prev };
-                    itemsToGen.forEach(item => { next[item.id] = { loading: true }; });
-                    return next;
-                });
-                for (const item of itemsToGen) { await handleGenerateAI(item); }
-                setIsGeneratingAll(false);
-            };
-
             const handleStartQuiz = (category, pageIdx = 0, isMistakeMode = false) => {
                 if (!isLocked) { setShowNameWarning(true); return; }
                 let questions = [];
+                
                 if (isMistakeMode) {
                     const mistakeIds = mistakeLog.map(m => m.id);
                     questions = allItems.filter(i => mistakeIds.includes(i.id));
                     questions.sort(() => Math.random() - 0.5);
                 } else {
                     let sourceItems = category === '收藏夾' ? allItems.filter(i => favorites.includes(i.id)) : parsedData[category];
-                    if (!sourceItems) return;
+                    if (!sourceItems) return; 
                     const start = pageIdx * ITEMS_PER_PAGE;
                     questions = sourceItems.slice(start, start + ITEMS_PER_PAGE);
                 }
-                if (questions.length === 0) { alert(isMistakeMode ? "目前沒有錯題紀錄！" : "此頁面無題目"); return; }
+
+                if (questions.length === 0) {
+                    alert(isMistakeMode ? "目前沒有錯題紀錄！" : "此頁面無題目");
+                    return;
+                }
+
                 const quizSet = questions.map(item => {
                     let pool = allItems.filter(i => i.id !== item.id);
                     const distractors = pool.sort(() => Math.random() - 0.5).slice(0, 3);
                     const options = [...distractors, item].sort(() => Math.random() - 0.5);
                     return { ...item, options, userAnswer: null, isCorrect: null };
                 });
-                setQuizQuestions(quizSet); setQuizScore(0); setCombo(0); setQuizPage(pageIdx);
-                setActiveCategory(isMistakeMode ? '錯題本' : category); setCurrentMode('quiz');
-            };
 
-            const handleQuizPageChange = (newPage) => {
-                handleStartQuiz(activeCategory, newPage, activeCategory === '錯題本');
+                setQuizQuestions(quizSet);
+                setQuizScore(0);
+                setCombo(0);
+                setQuizPage(pageIdx);
+                setActiveCategory(isMistakeMode ? '錯題本' : category);
+                setCurrentMode('quiz');
             };
 
             const handleAnswer = (qIndex, selectedOptionId) => {
                 const newQuestions = [...quizQuestions];
                 const q = newQuestions[qIndex];
                 if (q.userAnswer !== null) return;
+
                 const isCorrect = selectedOptionId === q.id;
-                q.userAnswer = selectedOptionId; q.isCorrect = isCorrect;
-                if (isCorrect) { setQuizScore(s => s + 1); setCombo(c => c + 1); playSoundEffect('correct'); confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } }); } 
-                else { 
-                    setCombo(0); 
-                    playSoundEffect('wrong'); 
-                    // FORCE UPDATE & SAVE
-                    setMistakeLog(prev => { 
-                        const existing = prev.find(m => m.id === q.id); 
-                        const newLog = existing ? prev.map(m => m.id === q.id ? { ...m, count: m.count + 1, lastMissed: new Date().toISOString() } : m) : [...prev, { id: q.id, count: 1, lastMissed: new Date().toISOString() }]; 
-                        localStorage.setItem('idiomMistakes', JSON.stringify(newLog)); // Force save
+                q.userAnswer = selectedOptionId;
+                q.isCorrect = isCorrect;
+
+                if (isCorrect) {
+                    setQuizScore(s => s + 1);
+                    setCombo(c => c + 1);
+                    playSoundEffect('correct');
+                    confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
+                } else {
+                    setCombo(0);
+                    playSoundEffect('wrong');
+                    setMistakeLog(prev => {
+                        const existing = prev.find(m => m.id === q.id);
+                        const newLog = existing ? prev.map(m => m.id === q.id ? { ...m, count: m.count + 1, lastMissed: new Date().toISOString() } : m) : [...prev, { id: q.id, count: 1, lastMissed: new Date().toISOString() }];
+                        localStorage.setItem('idiomMistakes', JSON.stringify(newLog)); // Force save immediately
                         return newLog;
-                    }); 
+                    });
                 }
                 setQuizQuestions(newQuestions);
             };
@@ -851,9 +837,7 @@
                             favorites={favorites} toggleFavorite={toggleFavorite}
                             completedDays={completedDays}
                             onMenu={() => setCurrentMode('menu')}
-                            onGenerateAll={handleGenerateAllAI}
-                            isGeneratingAll={isGeneratingAll}
-                            aiData={aiData}
+                            // No AI props needed now
                         />
                     )}
                     {currentMode === 'quiz' && (
@@ -866,7 +850,7 @@
                             activeCategory={activeCategory}
                             totalItems={activeCategory === '收藏夾' ? favorites.length : (parsedData[activeCategory]?.length || 0)}
                             quizPage={quizPage}
-                            onPageChange={handleQuizPageChange}
+                            onPageChange={(page) => handleStartQuiz(activeCategory, page)}
                             completedDays={completedDays}
                         />
                     )}
